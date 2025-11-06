@@ -22,7 +22,7 @@
             ]
           },
           {
-            "group": "Customization",
+            "group": "Features",
             "pages": [
               "essentials/settings",
               "essentials/navigation"
