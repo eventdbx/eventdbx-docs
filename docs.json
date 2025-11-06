@@ -33,9 +33,9 @@
           {
             "group": "Plugins",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "plugins/cursor",
+              "plugins/claude-code",
+              "plugins/windsurf"
             ]
           }
         ]
@@ -46,16 +46,16 @@
           {
             "group": "CLI documentation",
             "pages": [
-              "api-reference/introduction"
+              "cli-reference/introduction"
             ]
           },
           {
             "group": "Endpoint examples",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "cli-reference/endpoint/get",
+              "cli-reference/endpoint/create",
+              "cli-reference/endpoint/delete",
+              "cli-reference/endpoint/webhook"
             ]
           }
         ]
