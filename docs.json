@@ -61,8 +61,8 @@
     ],
     "primary": {
       "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.eventdbx.com"
+      "label": "Github",
+      "href": "https://github.com/thachp/eventdbx"
     }
   },
   "contextual": {
@@ -79,9 +79,7 @@
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/thachp/eventdbx",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/thachp/eventdbx"
     }
   }
 }
