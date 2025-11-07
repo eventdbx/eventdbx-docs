@@ -25,40 +25,11 @@
           {
             "group": "Core Concepts",
             "pages": [
-              "core-concepts/flexibility",
-              "core-concepts/data-integrity",
-              "core-concepts/security",
-              "core-concepts/auditability",
-              "core-concepts/extensibility"
-            ]
-          },
-          {
-            "group": "Domain Context",
-            "pages": [
-              "domain-context/ability-to-switch-between-context"
-            ]
-          },
-          {
-            "group": "Aggregate / Events",
-            "pages": [
-              "aggregate-events/snapshot",
-              "aggregate-events/aggregate",
-              "aggregate-events/events"
-            ]
-          },
-          {
-            "group": "Schema Definition",
-            "pages": [
-              "schema-definition/column-definition",
-              "schema-definition/rules",
-              "schema-definition/format"
-            ]
-          },
-          {
-            "group": "Replication",
-            "pages": [
-              "replication/standby-non-distributive",
-              "replication/watch-push-pull"
+              "core-concepts/philosophy",
+              "core-concepts/domain-context",
+              "core-concepts/aggregate-events",
+              "core-concepts/schema-definition",
+              "core-concepts/replication"
             ]
           },
           {
@@ -67,13 +38,12 @@
               "technical/captain-protocol",
               "technical/mcp-server",
               "technical/mcp-server/xxx",
-              "technical/plugins/overview",
-              "technical/plugins/http",
-              "technical/plugins/tcp",
-              "technical/plugins/capnp",
-              "technical/plugins/process",
-              "technical/plugins/log",
-              "technical/integration/overview",
+              "technical/plugins"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
               "technical/integration/restful",
               "technical/integration/graphql",
               "technical/integration/search",

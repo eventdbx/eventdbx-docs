@@ -1,0 +1,14 @@
+---
+title: "Domain Context"
+description: "Organize work into bounded contexts and switch between them without losing integrity."
+---
+
+Domains keep schemas, aggregates, and replication schedules scoped to a single bounded context. Operators can hop between them instantly, but each remains isolated on disk so experiments never corrupt production roots.
+
+## Ability to switch between contexts
+
+- Use `dbx checkout <domain>` to move between contexts while keeping local state, tokens, and logs separate.
+- Pair `dbx status` with naming conventions (e.g., `payments-prod`, `payments-dev`) so operators always know which root they are touching.
+- Promote or replicate contexts independently; watchers respect the active domain so migrations stay deterministic.
+
+[Detailed outline → Ability to switch between context](../domain-context/ability-to-switch-between-context)

@@ -1,0 +1,22 @@
+---
+title: "Replication"
+description: "Design standby replicas, promote nodes safely, and automate push/pull/watch workflows."
+---
+
+EventDBX replication favors a primary-plus-standby topology: one node owns writes, while others stay warm and ready to take over. Operators use `push`, `pull`, and `watch` commands to keep Merkle trees aligned across environments.
+
+## Approach a standby & non-distributive database
+
+- Stick to a single writer to avoid conflicting histories; treat every other node as a deterministic replica.
+- Promote a standby only after comparing Merkle hashes and verifying the last replicated offset.
+- Capture automation runbooks for token rotation, firewall changes, and client failover when promotion happens.
+
+[Deep dive → Standby strategy](../replication/standby-non-distributive)
+
+## Watch / push / pull
+
+- Use `dbx watch` to stream changes continuously when latency matters.
+- Schedule `dbx push`/`dbx pull` windows for bulk transfers or air-gapped environments.
+- Instrument retries, bandwidth, and drift alerts so operators catch failures quickly.
+
+[Deep dive → Watch / push / pull](../replication/watch-push-pull)

@@ -1,0 +1,46 @@
+---
+title: "Philosophy"
+description: "Understand the principles that shape EventDBX—flexibility, integrity, security, auditability, and extensibility."
+---
+
+EventDBX centers on append-only truth, reproducible state, and integrations that never block writes. Use this page as the high-level compass, then jump into the linked deep dives when you are ready to ship.
+
+## Flexibility
+
+- Use `dbx checkout` to spin up isolated domains so experiments never bleed into production lanes.
+- Reshape aggregates safely by re-snapshotting and replaying events instead of rewriting state in place.
+- Feed only the slices each read model needs by tailoring plugin payload selectors.
+
+[Deep dive → Flexibility](./flexibility)
+
+## Data integrity
+
+- Per-aggregate Merkle trees prove state, payload, and metadata authenticity.
+- Toggle `dbx restrict` between permissive and strict modes to match your environment.
+- Replication compares hashes before promoting a standby so you never ship drift.
+
+[Deep dive → Data integrity](./data-integrity)
+
+## Security
+
+- Mint Ed25519 tokens per role, rotate them regularly, and scope CLI commands tightly.
+- Terminate TLS (or mTLS) at the daemon and plugins so credentials never cross plaintext.
+- Treat plugin credentials as first-class secrets with rotation and audit hooks.
+
+[Deep dive → Security](./security)
+
+## Auditability
+
+- Every aggregate keeps an append-only history plus deterministic snapshots for quick reads.
+- Export proofs to auditors or partner teams without replaying production traffic.
+- Use CLI helpers to sign, archive, and verify aggregate timelines.
+
+[Deep dive → Auditability](./auditability)
+
+## Extensibility
+
+- Build plugins that emit just the payload slices downstream systems expect.
+- Extend schema rules, column types, or transports without stopping the daemon.
+- Bridge EventDBX into existing buses, CDC pipelines, or serverless workers.
+
+[Deep dive → Extensibility](./extensibility)

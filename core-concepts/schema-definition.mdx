@@ -1,0 +1,30 @@
+---
+title: "Schema Definition"
+description: "Design event and snapshot schemas that balance iteration speed with strict guarantees."
+---
+
+Schema enforcement in EventDBX is opt-in and gradual: you start flexible, codify columns as you learn, then bake validation rules once the model hardens. Use this page as the entry point for schema planning.
+
+## Column definition
+
+- Choose column types (string, number, enum, JSON) that match how downstream systems consume data.
+- Use `dbx schema column add` to evolve structures without rewriting historical payloads.
+- Embed docs and ownership notes next to each column so teams know when it is safe to reuse them.
+
+[Deep dive → Column definition](../schema-definition/column-definition)
+
+## Rules
+
+- Attach validation rules globally or per column to enforce ranges, regexes, or custom predicates.
+- Test new rules in permissive mode before promoting them to strict enforcement.
+- Track how rule changes impact historical data and plan remediation steps up front.
+
+[Deep dive → Rules](../schema-definition/rules)
+
+## Format
+
+- Pick JSON when you need inspection simplicity; switch to Cap'n Proto or other binaries for throughput.
+- Document schema serialization choices so downstream teams can regenerate bindings.
+- Plan migrations carefully: run dual writes, validate consumers, then deprecate the old format.
+
+[Deep dive → Format](../schema-definition/format)

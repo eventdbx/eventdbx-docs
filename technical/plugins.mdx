@@ -1,0 +1,54 @@
+---
+title: "Plugins"
+description: "Understand the plugin surface area before diving into each transport-specific guide."
+---
+
+Plugins dequeue committed events, transform the payload slices they care about, and push them to external systems. Start here to pick a transport, then follow the linked sections for configuration and operational details.
+
+## Overview
+
+- Learn how selectors, batching, retries, and acknowledgements work together.
+- Decide whether to run plugins alongside the daemon or remotely with MPC coordination.
+- Track metrics and logs for each plugin so you can remediate failures quickly.
+
+[Deep dive → Plugin overview](./plugins/overview)
+
+## HTTP
+
+- POST payload slices to any HTTPS endpoint with configurable headers and auth.
+- Use batching plus exponential backoff to avoid overwhelming downstream services.
+- Export metrics such as delivery latency and DLQ counts.
+
+[Deep dive → HTTP plugin](./plugins/http)
+
+## TCP
+
+- Stream events over raw sockets when latency matters most.
+- Wrap the channel in TLS, WireGuard, or SSH tunnels if the network is untrusted.
+- Tune buffer sizes, batch counts, and concurrency to match consumer throughput.
+
+[Deep dive → TCP plugin](./plugins/tcp)
+
+## CaPnP
+
+- Serialize payloads with Cap'n Proto for compact delivery and fast decoding.
+- Generate schemas from EventDBX columns, then share them with downstream consumers.
+- Plan for schema evolution by versioning messages and keeping decoders backwards compatible.
+
+[Deep dive → CaPnP plugin](./plugins/capnp)
+
+## Process
+
+- Spawn local executables per event for ultimate flexibility (and responsibility).
+- Template payloads into env vars or temporary files, then enforce CPU/memory limits.
+- Monitor exit codes and timeouts to keep the queue healthy.
+
+[Deep dive → Process plugin](./plugins/process)
+
+## Log
+
+- Emit NDJSON to local or remote log collectors for SIEM/Audit ingestion.
+- Rotate, compress, and ship logs with your preferred agent (Fluent Bit, Vector, etc.).
+- Prefer the log plugin when you need human-readable trails or offline archives.
+
+[Deep dive → Log plugin](./plugins/log)
