@@ -55,8 +55,8 @@
   "navbar": {
     "links": [
       {
-        "label": "Support",
-        "href": "mailto:hi@eventdbx.com"
+        "label": "Help",
+        "href": "https://github.com/thachp/eventdbx/issues/new"
       }
     ]
   },
