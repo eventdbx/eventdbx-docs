@@ -13,10 +13,10 @@ These guidelines keep EventDBX cohesive across code, docs, and community touchpo
 
 ## Engineering practices
 
-1. Start from a fresh branch named `feature/<topic>` or `fix/<topic>`.
+1. Start from a fresh branch named `feat/<topic>` or `fix/<topic>`.
 2. Keep commits reviewable and describe intent, not implementation details.
-3. Add or update automated tests whenever behavior, schemas, or CLI surfaces change.
-4. Run the linters/formatters (`pnpm lint`, `pnpm format`, `cargo fmt`, etc.) before opening a pull request.
+3. Add or update automated tests (`cargo test`, integration harnesses) whenever behavior, schemas, or CLI surfaces change.
+4. Run `cargo fmt` and `cargo clippy --all-targets --all-features` before opening a pull request so reviewers see consistent style and lint hygiene.
 
 Use feature flags rather than long-lived branches for experimental functionality, and prefer backwards-compatible migrations so downstream plugins stay stable.
 
