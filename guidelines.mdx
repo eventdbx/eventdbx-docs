@@ -1,0 +1,38 @@
+---
+title: "Guidelines"
+description: "Shared engineering, documentation, and community practices for the EventDBX project."
+---
+
+These guidelines keep EventDBX cohesive across code, docs, and community touchpoints. Pair them with the [Contributing guide](/contributing) for step-by-step workflows.
+
+## Core principles
+
+- **Security by default** – assume every change touches sensitive data; never ship secrets, always validate payloads, and keep dependency audits flowing.
+- **Deterministic builds** – document exact toolchain versions in `README.md` or per-component guides so other contributors reproduce results without guesswork.
+- **Traceable decisions** – capture architecture or product decisions in RFCs, issues, or discussions and link them from the relevant docs page.
+
+## Engineering practices
+
+1. Start from a fresh branch named `feature/<topic>` or `fix/<topic>`.
+2. Keep commits reviewable and describe intent, not implementation details.
+3. Add or update automated tests whenever behavior, schemas, or CLI surfaces change.
+4. Run the linters/formatters (`pnpm lint`, `pnpm format`, `cargo fmt`, etc.) before opening a pull request.
+
+Use feature flags rather than long-lived branches for experimental functionality, and prefer backwards-compatible migrations so downstream plugins stay stable.
+
+## Documentation standards
+
+- Every new feature, command, or configuration surface needs at least a short note in the docs.
+- Frontmatter (`title`, `description`) should be specific enough to appear alone in search results.
+- Add `Tip`, `Warning`, or tables when they help the reader act faster; avoid duplicating long CLI outputs unless they illustrate a concept.
+- Link to related sections (for example, `/core-concepts/schema-definition`) so readers can build context progressively.
+
+## Issue and PR hygiene
+
+- Open issues with reproduction steps, environment details, and the observed vs. expected behavior.
+- Reference issues from pull requests using `Fixes #123` (or `Relates to #123` for partial work) so automation can trace deployments.
+- Surface breaking changes in both the PR description and `CHANGELOG.md` under the “Unreleased” heading.
+
+## Community expectations
+
+We follow the [Contributor Covenant](https://www.contributor-covenant.org/). Interactions in issues, discussions, and Slack should stay respectful, inclusive, and focused on the work. Use private channels or the security mailing list when disclosure requires it.

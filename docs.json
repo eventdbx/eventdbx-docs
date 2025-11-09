@@ -47,7 +47,7 @@
           },
           {
             "group": "Contributing",
-            "pages": ["Guidelines", "license"]
+            "pages": ["guidelines", "license"]
           }
         ]
       },
