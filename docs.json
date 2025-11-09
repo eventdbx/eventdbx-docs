@@ -15,7 +15,13 @@
         "groups": [
           {
             "group": "Getting Started",
-            "pages": ["index", "features", "quickstart", "deployment"]
+            "pages": [
+              "index",
+              "features",
+              "quickstart",
+              "client-sdks",
+              "deployment"
+            ]
           },
           {
             "group": "Core Concepts",
@@ -33,7 +39,6 @@
               "technical/captain-protocol",
               "technical/noise-protocol",
               "technical/mcp-server",
-              "technical/client-sdks",
               "technical/plugins"
             ]
           },
