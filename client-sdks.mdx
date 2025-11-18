@@ -46,9 +46,9 @@ await client.disconnect();
 
 Features:
 
-- Async + sync APIs.
-- Typed payload helpers via `pydantic`.
-- Built-in retry with exponential backoff.
+- Promise-first API plus async iterables for streaming aggregate history or live tails.
+- Full TypeScript declarations so payloads/metadata stay strongly typed across your app.
+- Automatic reconnect + exponential-backoff retries baked into every call.
 
 ## Python
 
@@ -205,6 +205,57 @@ Features:
 - Context-aware calls for cancellation/timeouts.
 - Native channels for streaming events.
 - OTEL instrumentation helpers.
+
+## Rust
+
+```bash
+cargo add eventdbx-client
+```
+
+```rust
+use eventdbx_client::{
+    AppendEventRequest, ClientConfig, EventDbxClient, ListAggregatesOptions,
+};
+use serde_json::json;
+use std::env;
+
+#[tokio::main]
+async fn main() -> eventdbx_client::Result<()> {
+    let host = env::var("EVENTDBX_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let token = env::var("EVENTDBX_TOKEN")?;
+    let port = env::var("EVENTDBX_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(6363);
+    let tenant = env::var("EVENTDBX_TENANT").unwrap_or_else(|_| "default".into());
+
+    let config = ClientConfig::new(host, token)
+        .with_port(port)
+        .with_tenant(tenant);
+    let client = EventDbxClient::connect(config).await?;
+
+    let append = AppendEventRequest::new(
+        "invoice",
+        "inv-991",
+        "invoice_paid",
+        json!({ "amount": 4200 }),
+    );
+    client.append_event(append).await?;
+
+    let aggregates = client
+        .list_aggregates(ListAggregatesOptions::default())
+        .await?;
+    println!("Aggregates returned: {}", aggregates.aggregates.len());
+
+    Ok(())
+}
+```
+
+Features:
+
+- Tokio-native async client with automatic Cap'n Proto handshake and per-call timeouts.
+- Request builders (`AppendEventRequest`, `PatchEventRequest`, etc.) keep payloads strongly typed through `serde_json`.
+- Optional `telemetry` feature wires into `tracing`, plus the bundled `dbxtest-cli` binary for quick smoke tests.
 
 ## Common patterns
 
