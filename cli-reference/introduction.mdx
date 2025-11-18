@@ -35,6 +35,15 @@ The `dbx` CLI is the single entry point for starting the daemon, managing schema
 
 Tokens are Ed25519 signed; keys live under `[auth]` in `config.toml`.
 
+## Tenants
+
+- `dbx tenant assign <tenant> --shard <shard-0001>` – pin a tenant to a shard label instead of hashing across the configured shard count.
+- `dbx tenant unassign <tenant>` – drop the manual shard override.
+- `dbx tenant list [--shard <shard-0001>] [--json]` – print assignments plus `quota_mb` and `usage_mb` columns so you can watch noisy tenants in plain text or JSON.
+- `dbx tenant stats [--json]` – summarise how many explicit assignments sit on each shard.
+- `dbx tenant quota set <tenant> --max-mb <n>` / `dbx tenant quota clear <tenant>` – enforce or remove per-tenant storage ceilings.
+- `dbx tenant quota recalc <tenant>` – rescan a tenant’s RocksDB files to refresh usage counters after restores or manual maintenance.
+
 ## Schemas
 
 - `dbx schema create <name> --events <event1,event2,...> [--snapshot-threshold <u64>]`

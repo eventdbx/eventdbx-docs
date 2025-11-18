@@ -13,6 +13,7 @@ EventDBX focuses on the write side of CQRS so you can capture every mutation as 
 - **Merkle tree integration** – every aggregate maintains a Merkle tree of its events so `dbx aggregate verify` can detect tampering by recomputing the root hash.
 - **Built-in audit trails** – administrators can issue scoped tokens for auditors, granting read-only access to selected aggregates and their events.
 - **Extensible read models** – plugins consume the job queue and can request only the slices they need (event payload, materialized state, schema, or combinations). This keeps the write path isolated from read-model concerns.
+- **Tenant-level quotas** – `dbx tenant quota set` enforces per-tenant storage ceilings, `tenant list` reports live `quota_mb`/`usage_mb` counters, and `tenant quota recalc` rescans SSTs after restores so noisy neighbours cannot starve other domains.
 - **Remote replication** – `dbx push`, `dbx pull`, and `dbx watch` keep domains in sync with Merkle + version checks. Divergent histories abort automatically instead of rewriting events.
 - **Observability and security** – Prometheus metrics cover HTTP traffic and plugin queue health, while Ed25519-signed tokens plus optional payload encryption protect access.
 

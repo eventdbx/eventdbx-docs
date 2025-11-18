@@ -10,6 +10,46 @@ Every SDK exposes the same primitives—connect, authenticate, create aggregates
   pagination, and typing so product engineers ship faster.
 </Info>
 
+## Typescript
+
+```bash
+npm install eventdbxjs
+```
+
+```typescript
+import { createClient } from "eventdbxjs";
+
+const client = createClient({
+  ip: process.env.EVENTDBX_HOST ?? "127.0.0.1",
+  port: Number(process.env.EVENTDBX_PORT) || 6363,
+  token: process.env.EVENTDBX_TOKEN,
+  tenantId: "default",
+});
+
+await client.connect();
+
+await client.create("person", "p-110", "person_created", {
+  payload: {
+    fist_name: "Demo",
+    last_name: "Demo",
+    email: "jane@example.com",
+  },
+  metadata: { "@createdBy": "<current-id>" },
+  note: "person created by <email>",
+});
+
+const history = await client.events("person", "p-110");
+console.log("Event count:", history.length);
+
+await client.disconnect();
+```
+
+Features:
+
+- Async + sync APIs.
+- Typed payload helpers via `pydantic`.
+- Built-in retry with exponential backoff.
+
 ## Python
 
 ```bash
@@ -17,23 +57,40 @@ pip install eventdbx
 ```
 
 ```python
-from eventdbx import Client
+import json
 
-client = Client(
-    host="payments.internal",
-    port=6363,
-    token=os.environ["EVENTDBX_TOKEN"],
-    domain="payments-prod",
-)
+from eventdbx import EventDBXClient
 
-snapshot = client.create(
-    aggregate="invoice",
-    aggregate_id="inv-991",
-    event="invoice_issued",
-    payload={"amount": 4200, "currency": "USD"},
-    metadata={"@actor": "svc-invoice"},
-)
-print(snapshot.version)
+with EventDBXClient(token="<token>", tenant_id="<tenant_id>") as client:
+    # Create a brand-new aggregate via the control plane
+    created = client.create(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="created",
+        payload_json=json.dumps({"total": 42.15}),
+    )
+
+    # Append follow-up events to the aggregate
+    updated = client.apply(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="paid",
+        payload_json=json.dumps({"status": "paid"}),
+    )
+
+    # List aggregates or fetch events for a specific aggregate
+    aggregates = client.list(take=50)
+
+    # Apply JSON Patch documents to historical events
+    patched = client.patch(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="created",
+        patches=[{"op": "replace", "path": "/total", "value": 45.10}],
+    )
+
+    # Archive / restore lifecycle management
+    client.restore(aggregate_type="orders", aggregate_id="ord_123")
 ```
 
 Features:

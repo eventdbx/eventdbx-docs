@@ -7,7 +7,7 @@
     "light": "#f8fafc",
     "dark": "#334155"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/favicon.ico",
   "navigation": {
     "tabs": [
       {
@@ -75,7 +75,7 @@
     "links": [
       {
         "label": "Submit a Bug",
-        "href": "https://github.com/thachp/eventdbx/issues/new"
+        "href": "https://github.com/eventdbx/eventdbx/issues/new"
       }
     ]
   },

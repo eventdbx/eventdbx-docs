@@ -10,6 +10,7 @@ EventDBX is an append-only, event-sourced write store that keeps your aggregates
 - **Immutable, append-only core** – events land in RocksDB with Merkle trees per aggregate so you can verify state integrity at any time.
 - **CQRS-first design** – the engine focuses on the write side while plugins stream the slices (event, state, schema) your read models need.
 - **Schema enforcement on your terms** – switch between permissive prototyping and strict production validation with a single flag.
+- **Tenant-aware guardrails** – `dbx tenant quota set`/`clear` enforce per-tenant storage ceilings, and `dbx tenant list` reports live usage so noisy neighbours cannot starve shared clusters.
 - **Operationally simple** – domains isolate data, CLI commands cover schema/state management, and replication honors version + Merkle parity.
 
 <Tip>
@@ -37,18 +38,6 @@ EventDBX is an append-only, event-sourced write store that keeps your aggregates
   <Card title="Operate & integrate" icon="server" href="/deployment">
     Run EventDBX under Docker, issue tokens, connect TypeScript clients, and
     schedule replication jobs.
-  </Card>
-  <Card title="Plugins" icon="shuffle" href="/plugins/overview">
-    Learn how plugin instances consume the job queue, configure payload slices,
-    and replay events.
-  </Card>
-  <Card
-    title="CLI reference"
-    icon="terminal"
-    href="/cli-reference/introduction"
-  >
-    Browse every `dbx` command grouped by lifecycle, schemas, aggregates,
-    events, plugins, and upgrades.
   </Card>
 </CardGroup>
 
