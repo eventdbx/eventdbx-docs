@@ -10,6 +10,24 @@ Every SDK exposes the same primitives—connect, authenticate, create aggregates
   pagination, and typing so product engineers ship faster.
 </Info>
 
+## See it, shape it
+
+“See It (L-G-S), Shape It (C-A-P-A-R)” is the EventDBX shorthand for the operational verbs—short, visual, sticky, and a clear split between reads and writes.
+
+**See It — read actions**
+
+- `list` – paginate across aggregates (or staged aggregates) with consistent filters and limits.
+- `get` – fetch the latest aggregate state, metadata, and Merkle information in one call.
+- `select` – return a filtered subset of fields or dot-paths from aggregate state without transferring the full payload.
+
+**Shape It — event-writing actions**
+
+- `create` – register a brand-new aggregate and seed the first event via the control plane.
+- `apply` – append a new event to an existing aggregate after running schema validation.
+- `patch` – submit JSON Patch documents that adjust historical payloads.
+- `archive` – mark aggregates read-only so they remain queryable but reject new events.
+- `restore` – flip archived aggregates back to active, allowing writes again.
+
 ## Typescript
 
 ```bash
