@@ -1,0 +1,136 @@
+---
+title: "Use Cases"
+description: "Map the domains where EventDBX’s immutable event log, schemas, and replication model shine."
+---
+
+Below is an organized, wide-angle map of real-world scenarios where EventDBX removes friction, adds traceability, or both. Use it to spot overlaps with your domain or validate bets you are already making.
+
+## Systems that require full historical reconstruction
+
+When knowing how the data changed is just as important as the latest state. You want to rewind time, inspect every mutation, and prove why the present looks the way it does.
+
+- Medical records and clinical decision systems
+- Financial transactions, ledgers, and accounting workflows
+- Livestock lifecycle tracking (birth, vaccination, weight, transfer, death)
+- Supply-chain checkpoints and custody transitions
+- Manufacturing logs covering every station on the line
+- Insurance claim histories
+- Customer support timelines
+- User activity / behavior trails
+- Audit logs for compliance reviews
+
+## Safety-critical and mission-critical machines
+
+Machines where every micro-event must be part of a forensic trail. Immutable truth underpins investigations and reliability guarantees.
+
+- Autonomous drones (flight logs, IMU data, command streams)
+- Rockets and launch vehicles (telemetry, valve events, thrust changes)
+- Satellites (orbital events, subsystem adjustments)
+- Cars and EVs (ADAS signals, battery cycles, braking telemetry)
+- Industrial robots (sensor fusion, error states, operator overrides)
+- Aviation systems (flight control inputs, airspeed changes)
+
+## IoT and edge computing
+
+Small devices speak in streams. The world changes in discrete steps, not overwrites, which makes append-only event storage a natural fit.
+
+- Environmental sensors reporting temperature, pressure, humidity, GPS, vibration
+- Home automation devices coordinating scenes and actuators
+- Smart meters for water, electric, and gas
+- Agricultural sensors (soil moisture, rumen monitors, RFID readers)
+- Factory-floor devices tracking cycle counts and wear
+
+## Offline-first or intermittently connected systems
+
+Connectivity is flaky, but truth must eventually sync. Peer-to-peer replication and staged writes become superpowers here.
+
+- Drones syncing logs after missions
+- Field technicians uploading equipment logs when connectivity appears
+- Farm devices recording events during the day and syncing overnight
+- Mobile apps that need durable local write-side storage
+- Disaster-response systems coordinating across degraded networks
+
+## Distributed and replicated systems
+
+Multiple nodes exchange truth safely, often across regions or tenants. EventDBX acts like Git for application data when you need optimistic sync with conflict detection.
+
+- Peer-to-peer collaboration tools
+- Replicated ledgers for internal services
+- Multi-region microservices and sharded control planes
+- Multi-tenant SaaS domains
+- AI agent memory stores (MCP workflows, autonomous agents)
+
+## Systems that need versioned schemas
+
+When your model evolves alongside the business. Schemas become part of the story instead of a fear-inducing chore.
+
+- SaaS products with constantly shifting feature sets
+- Data pipelines that require backward-compatible contract enforcement
+- Multi-team systems where coordinated migrations are painful
+- Regulated applications that need explicit schema-version trails
+
+## Observability, analytics, and replay scenarios
+
+Business logic often depends on sequences, not snapshots. EventDBX lets you replay, fork, and experiment without losing provenance.
+
+- Fraud and anomaly detection pipelines
+- User behavior tracking and growth experimentation
+- Manufacturing yield analysis
+- Predictive maintenance
+- Timeline-based debugging and retroactive fixes
+
+## Immutable, tamper-evident logs
+
+Cryptographic truth is a hard requirement. Noise Protocol handshakes plus Merkle roots provide a “truth engine” that proves nothing was altered.
+
+- Healthcare compliance attestations
+- Financial auditing trails
+- Legal and forensic records
+- Provenance tracking (food, supply chain, art, documents)
+- Internal security logs
+- Data-integrity guarantees for AI agents and copilots
+
+## Developer-focused workflows
+
+Teams that value speed and iteration. Developers spend more time shipping and less time wrestling schema migrations or spinning ad-hoc databases.
+
+- Backend systems that must avoid painful migrations
+- Serverless apps running on Vercel, Cloudflare, or GCP functions
+- Prototyping new domain logic or feature spikes
+- Local-first development environments
+- CLIs and automation tools that need durable state without a full database
+
+## Domain-driven design systems
+
+Events are the primary business concepts, so aggregates map directly to ubiquitous language.
+
+- Order lifecycles (created → paid → shipped → delivered)
+- Subscription lifecycles
+- Ticketing and incident systems
+- Project and task management tools
+- Identity systems (`user_registered`, `user_verified`, `user_updated`)
+
+## AI memory and agent orchestration
+
+Agents need stable memory more than fast SQL queries. EventDBX gives them a durable commit log for reasoning, replay, and accountability.
+
+- Long-term memory for autonomous agents
+- Durable commit logs for workflow engines
+- Reproducible task sequences and battle-tested playbooks
+- Shared knowledge bases across cooperating agents
+- Immutable “thought trails” with verifiable cross-agent messaging
+
+## Niche but powerful engineering cases
+
+Places where traditional databases feel too heavy or too mutable. If it can emit events, it can live in EventDBX.
+
+- Embedded systems needing local persistence
+- Hardware that requires cryptographic audit logs
+- Devices persisting straight to SSDs or SD cards
+- Large-scale simulation logs
+- Scientific experiments (lab equipment event trails)
+- Geospatial event trails (GPS traces, route reconstruction)
+
+---
+
+EventDBX excel when change itself is the product. Pick the pattern that matches your reality, plug into the CLI/SDK stack, and treat every mutation as an asset instead of a liability.
