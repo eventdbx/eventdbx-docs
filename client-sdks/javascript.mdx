@@ -12,6 +12,7 @@ The JavaScript SDK (`eventdbxjs`) is a native Node-API addon (via [`napi-rs`](ht
 - RFC 6902 JSON Patch helpers baked into `client.patch`.
 - Async/await-friendly API surface with Promise-based helpers.
 - Automatic retries with configurable exponential backoff.
+- Per-call overrides for tokens, metadata, patch operations, and archived filters.
 - Cross-platform builds covering macOS, Linux, Windows, and WASI targets.
 
 ## Install
@@ -27,7 +28,7 @@ pnpm add eventdbxjs
   APIs, and raw TCP access to port 6363.
 </Note>
 
-## Initialize a client
+## Connect and configure
 
 ```ts
 import { createClient } from "eventdbxjs";
@@ -48,9 +49,181 @@ const client = createClient({
 await client.connect();
 ```
 
-`createClient` falls back to environment variables when options are omitted. Set `EVENTDBX_HOST`, `EVENTDBX_PORT`, `EVENTDBX_TOKEN`, and `EVENTDBX_TENANT_ID` (for multi-tenant deployments) to avoid hardcoding credentials in code, and opt into retries by passing a `retry` object.
+`createClient` falls back to environment variables when options are omitted. Set `EVENTDBX_HOST`, `EVENTDBX_PORT`, `EVENTDBX_TOKEN`, and `EVENTDBX_TENANT_ID` (for multi-tenant deployments) to avoid hardcoding credentials in code. The `retry` option enables exponential backoff without recreating the client.
 
-- Want the TypeScript surface area? The SDK exports the core client class and helper types for strongly typed integrations.
+### Connection lifecycle tips
+
+- Connect once per process and reuse the underlying TCP socket to avoid repeated TLS/token handshakes.
+- `await client.disconnect()` during graceful shutdown so the server releases cursors quickly.
+- `await client.isConnected()` lets you guard re-use when hot reloading in development.
+
+### Serverless or Edge entry points
+
+```ts
+import { createClient, type DbxClient } from "eventdbxjs";
+
+let cached: DbxClient | null = null;
+
+async function getClient() {
+  if (!cached) {
+    cached = createClient({
+      ip: process.env.EVENTDBX_HOST,
+      port: Number(process.env.EVENTDBX_PORT) || 6363,
+      token: process.env.EVENTDBX_TOKEN,
+      tenantId: process.env.EVENTDBX_TENANT_ID,
+    });
+  }
+  if (!(await cached.isConnected())) {
+    await cached.connect();
+  }
+  return cached;
+}
+
+export default async function handler(request: Request) {
+  const client = await getClient();
+  const aggregate = await client.get(
+    "person",
+    new URL(request.url).searchParams.get("id")!
+  );
+  return Response.json(aggregate);
+}
+```
+
+Module-level caches keep the connection alive across invocations in serverless/Edge runtimes that support global scope reuse (`Next.js`, `Remix`, Bun's serverless runtime, or any environment that exposes TCP primitives).
+
+## Runtime configuration
+
+| Variable             | Default     | Description                                               |
+| -------------------- | ----------- | --------------------------------------------------------- |
+| `EVENTDBX_HOST`      | `127.0.0.1` | Hostname or IP address of the control socket.             |
+| `EVENTDBX_PORT`      | `6363`      | TCP port that hosts the control plane.                    |
+| `EVENTDBX_TOKEN`     | _empty_     | Authentication token that the client forwards on connect. |
+| `EVENTDBX_TENANT_ID` | _empty_     | Tenant identifier included in the handshake.              |
+
+Set these variables or pass explicit overrides through `createClient`. Multi-tenant deployments always require `tenantId` (or `EVENTDBX_TENANT_ID`) so the server routes control requests correctly.
+
+## Manage authentication and tenancy
+
+Tokens and tenant identifiers can be set globally or per call. Every method that issues a request to the server accepts an optional `token`, so you can scope permissions to an end-user session without recreating the client.
+
+```ts
+const sessionToken = request.headers.get("x-eventdbx-token") ?? undefined;
+
+await client.apply("person", "p-110", "person_email_updated", {
+  payload: { email: request.body.email },
+  token: sessionToken,
+  metadata: {
+    "@actor": request.headers.get("x-actor"),
+  },
+  note: `Changed by ${request.headers.get("x-actor")}`,
+});
+```
+
+Use this pattern when a single process talks to multiple tenants or when privileged background jobs share infrastructure with user-triggered API routes.
+
+### Retry configuration
+
+Transport-level failures (socket resets, Cap’n Proto decode errors, etc.) can be retried automatically. Retries are disabled by default (`attempts = 1`), so opt in by setting the `retry` object:
+
+```ts
+const client = createClient({
+  token: process.env.EVENTDBX_TOKEN,
+  retry: {
+    attempts: 4, // total tries = initial attempt + (attempts - 1) retries
+    initialDelayMs: 100,
+    maxDelayMs: 2_000,
+  },
+});
+```
+
+Backoff doubles per retry until `maxDelayMs` is hit. Logical server errors (validation failures, authorization errors, etc.) still bubble to your application immediately.
+
+## Write aggregates and events
+
+```ts
+// create – register a new aggregate + first event in one call
+await client.create("person", "p-110", "person_registered", {
+  payload: {
+    first_name: "Jaya",
+    last_name: "Singh",
+    email: "jaya@example.com",
+  },
+  metadata: {
+    "@actor": "svc-directory",
+    note: "person created by hi@example.com",
+  },
+});
+
+// apply – append events to an existing aggregate
+await client.apply("person", "p-110", "person_email_updated", {
+  payload: { email: "jaya+alerts@example.com" },
+});
+
+// patch – apply RFC 6902 JSON patches to historical payloads
+await client.patch("person", "p-110", "person_registered", [
+  { op: "replace", path: "/first_name", value: "Jayah" },
+]);
+
+// archive / restore – toggle write access while keeping reads online
+await client.archive("person", "p-110", {
+  comment: "big beautiful comment",
+});
+await client.restore("person", "p-110");
+```
+
+`create` seeds a snapshot and first event atomically. `apply` appends new events. `patch` issues RFC 6902 operations against the requested historical payload, and `archive`/`restore` toggle write access while preserving history.
+
+## Read aggregates and events
+
+```ts
+// get – fetch the latest aggregate snapshot and metadata
+type Person = { first_name: string; last_name: string; email: string };
+const state: Person = await client.get("person", "p-110");
+
+// list – paginate aggregates with filters, sort, and cursor helpers
+const { items: people, nextCursor } = await client.list("person", {
+  take: 50,
+  cursor: "a:person:xxx",
+  filter: "person.status = true AND person.last_name = 'thach'",
+});
+
+// select – project fields without returning the rest of the payload
+const summary = await client.select("person", "p-110", [
+  "first_name",
+  "last_name",
+]);
+
+// events – pull the full envelope stream
+const { items: history } = await client.events("person", "p-110");
+```
+
+Use `get` when you need the entire snapshot, `select` for sparse projections, `list` to traverse many aggregates, and `events` for CDC-style replay. All read methods share the same pagination helpers and filter grammar, returning a `PageResult` whose `items` contain either aggregates or event envelopes.
+
+## Filters, sorting, and pagination
+
+Filters use the same SQL-like shorthand as the EventDBX server (`field = value AND other_field > 10`), and sort fields accept names such as `aggregateType`, `aggregateId`, `version`, `merkleRoot`, and `archived`. Each entry in `PageResult.items` is the aggregate snapshot or event payload returned by the control socket.
+
+```ts
+const firstPage = await client.list("person", {
+  take: 25,
+  includeArchived: false,
+  filter: "person.archived = false AND person.last_name LIKE 'S%'",
+  sort: [{ field: "aggregateId" }, { field: "version", descending: true }],
+});
+
+if (firstPage.nextCursor) {
+  const nextPage = await client.list("person", {
+    cursor: firstPage.nextCursor,
+  });
+  // Resume until nextCursor is undefined
+}
+```
+
+`includeArchived`, `archivedOnly`, and request-scoped `token` overrides are part of the `PageOptions` passed to `list` and `events`. Always feed the returned `nextCursor` back into the next call when you need to resume pagination after hitting server-side page limits.
+
+## TypeScript surface area
+
+The SDK exports helper types so you can strongly type payloads, retries, and pagination in your application.
 
 ```ts
 export type JsonValue =
@@ -214,91 +387,4 @@ export declare function createClient(
 ): DbxClient;
 ```
 
-Filters use the same SQL-like shorthand as the EventDBX server (`field = value AND other_field > 10`), and sort fields accept names such as `aggregateType`, `aggregateId`, `version`, `merkleRoot`, and `archived`. Each entry in `PageResult.items` is the aggregate snapshot or event payload returned by the control socket. The generated `index.d.ts` file still types these payloads as `any`, but the runtime values follow the `Aggregate` and `Event` shapes shown above.
-
-## Runtime configuration
-
-| Variable             | Default     | Description                                               |
-| -------------------- | ----------- | --------------------------------------------------------- |
-| `EVENTDBX_HOST`      | `127.0.0.1` | Hostname or IP address of the control socket.             |
-| `EVENTDBX_PORT`      | `6363`      | TCP port that hosts the control plane.                    |
-| `EVENTDBX_TOKEN`     | _empty_     | Authentication token that the client forwards on connect. |
-| `EVENTDBX_TENANT_ID` | _empty_     | Tenant identifier included in the handshake.              |
-
-Set these variables or pass explicit overrides through `createClient`. Multi-tenant deployments always require `tenantId` (or `EVENTDBX_TENANT_ID`) so the server routes control requests correctly.
-
-### Retry configuration
-
-Transport-level failures (socket resets, Cap’n Proto decode errors, etc.) can be retried automatically. Retries are disabled by default (`attempts = 1`), so opt in by setting the `retry` object:
-
-```ts
-const client = createClient({
-  token: process.env.EVENTDBX_TOKEN,
-  retry: {
-    attempts: 4, // total tries = initial attempt + (attempts - 1) retries
-    initialDelayMs: 100,
-    maxDelayMs: 2_000,
-  },
-});
-```
-
-Backoff doubles per retry until `maxDelayMs` is hit. Logical server errors (validation failures, authorization errors, etc.) still bubble to your application immediately.
-
-## Shape It (write actions)
-
-```ts
-// create – register a new aggregate + first event in one call
-await client.create("person", "p-110", "person_registered", {
-  payload: {
-    first_name: "Jaya",
-    last_name: "Singh",
-    email: "jaya@example.com",
-  },
-  metadata: {
-    "@actor": "svc-directory",
-    note: "person created by hi@example.com",
-  },
-});
-
-// apply – append events to an existing aggregate
-await client.apply("person", "p-110", "person_email_updated", {
-  payload: { email: "jaya+alerts@example.com" },
-});
-
-// patch – apply RFC 6902 JSON patches to historical payloads
-await client.patch("person", "p-110", "person_registered", [
-  { op: "replace", path: "/first_name", value: "Jayah" },
-]);
-
-// archive / restore – toggle write access while keeping reads online
-await client.archive("person", "p-110", {
-  comment: "big beautiful comment",
-});
-await client.restore("person", "p-110");
-```
-
-## See It (read actions)
-
-```ts
-// get – fetch the latest aggregate snapshot and metadata
-type Person = { first_name: string; last_name: string; email: string };
-const state: Person = await client.get("person", "p-110");
-
-// list – paginate aggregates with filters, sort, and cursor helpers
-const { items: people, nextCursor } = await client.list("person", {
-  take: 50,
-  cursor: "a:person:xxx",
-  filter: "person.status = true AND person.last_name = 'thach'",
-});
-
-// select – project fields without returning the rest of the payload
-const summary = await client.select("person", "p-110", [
-  "first_name",
-  "last_name",
-]);
-
-// events – pull the full envelope stream
-const { items: history } = await client.events("person", "p-110");
-```
-
-Use the returned `nextCursor` whenever `list` or `events` needs to resume pagination.
+The generated `index.d.ts` file still types aggregate and event payloads as `any`, but the runtime values follow the `Aggregate` and `Event` shapes above, so you can layer your own domain-specific interfaces on top.
