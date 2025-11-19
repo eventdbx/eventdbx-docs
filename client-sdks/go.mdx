@@ -1,0 +1,136 @@
+---
+title: "Go SDK"
+description: "Use the idiomatic Go client to work with aggregates, events, and streaming cursors."
+---
+
+The Go package (`github.com/eventdbx/client-go`) favors context-aware calls, small interfaces, and composable middleware. It plays nicely with standard `net/http`, OpenTelemetry, and Go modules.
+
+## Install
+
+```bash
+go get github.com/eventdbx/client-go
+```
+
+<Note>Modules are versioned with semantic tags (`v0.x.y`). Pin a specific tag in `go.mod` for reproducible builds.</Note>
+
+## Connect and write events
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+
+    eventdbx "github.com/eventdbx/client-go"
+)
+
+func main() {
+    ctx := context.Background()
+
+    cli, err := eventdbx.NewClient(eventdbx.Config{
+        Host:    os.Getenv("EVENTDBX_HOST"),
+        Port:    6363,
+        Token:   os.Getenv("EVENTDBX_TOKEN"),
+        Tenant:  "people",
+        Insecure: false,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cli.Close()
+
+    err = cli.Aggregate("person").Create(ctx, "p-110", "person_registered", eventdbx.Event{
+        Payload: map[string]any{
+            "first_name": "Rafi",
+            "last_name":  "Stone",
+            "email":      "rafi@example.com",
+        },
+        Metadata: map[string]any{"@actor": "svc-directory"},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    _ = cli.Aggregate("person").Apply(ctx, "p-110", "person_email_updated", eventdbx.Event{
+        Payload: map[string]any{"email": "rafi+alerts@example.com"},
+    })
+
+    latest, _ := cli.Aggregate("person").Get(ctx, "p-110", nil)
+    log.Println("last event", latest.Sequence)
+}
+```
+
+Every public method accepts a `context.Context` so you can set deadlines and cancellation signals that propagate to the underlying transport.
+
+## Query aggregates
+
+```go
+result, err := cli.Aggregates().List(ctx, eventdbx.ListOptions{
+    Type:   "person",
+    Status: eventdbx.AggregateStatusActive,
+    Take:   100,
+})
+if err != nil {
+    return err
+}
+
+state, err := cli.Aggregate("person").Select(ctx, "p-110", []string{"payload.first_name", "payload.email"})
+```
+
+- `List` and `Select` paginate automatically and expose iterators when `Take` exceeds server limits.
+- `Select` returns sparse objects that only include requested fields, reducing payload size.
+
+## Streams and CDC workers
+
+```go
+stream := cli.Stream(eventdbx.StreamOptions{
+    Type:   "person",
+    From:   eventdbx.PositionHead(),
+    Follow: true,
+})
+
+defer stream.Close()
+for stream.Next(ctx) {
+    evt := stream.Event()
+    process(evt)
+}
+if err := stream.Err(); err != nil {
+    return err
+}
+```
+
+- Streams reuse the existing TCP connection and automatically backoff on transient disconnects.
+- Call `stream.Close()` or cancel the context to cleanly terminate.
+- Use `PartitionKey` when you need ordered shards for parallel consumers.
+
+## Middleware and observability
+
+```go
+import (
+    "context"
+    "log"
+    "time"
+
+    eventdbx "github.com/eventdbx/client-go"
+)
+
+cli.Use(eventdbx.MiddlewareFunc(func(next eventdbx.RoundTripper) eventdbx.RoundTripper {
+    return eventdbx.RoundTripperFunc(func(ctx context.Context, req *eventdbx.Request) (*eventdbx.Response, error) {
+        start := time.Now()
+        resp, err := next.RoundTrip(ctx, req)
+        log.Printf("eventdbx op=%s latency=%s", req.Operation, time.Since(start))
+        return resp, err
+    })
+}))
+```
+
+- Attach OTEL spans by wrapping `RoundTripper` or by injecting your own `*http.Client` via `Transport`.
+- Configure retries via `Config.Retry` (max attempts, jitter, timeout) to align with service SLOs.
+
+## Testing
+
+- Use the in-memory stub `eventdbx.NewInMemory()` to run unit tests without a daemon; it implements the same interfaces.
+- For integration tests, start `dbx sandbox start --tenant go-tests --auto-reset` and point the client to `localhost`.
+- Export JSON fixtures with `cli.Aggregate("person").Dump(ctx, "tests/fixtures/person.json")` and load them later with `cli.LoadFixture`.

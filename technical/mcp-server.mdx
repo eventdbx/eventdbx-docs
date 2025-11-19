@@ -34,7 +34,7 @@ Operators interact with MCP via CLI or API, while CI/CD pipelines push new confi
 
 - MCP is stateless; run 2–3 replicas behind a load balancer.
 - Persist manifests in Postgres or MySQL so history survives restarts.
-- Enable TLS + mTLS to ensure only authorized agents connect.
+- Require Noise_XX handshakes (or mutually authenticated tunnels) so only authorized agents connect.
 
 ## Observability
 

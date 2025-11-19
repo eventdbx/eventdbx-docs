@@ -20,7 +20,6 @@
               "features",
               "use-cases",
               "quickstart",
-              "client-sdks",
               "deployment"
             ]
           },
@@ -32,6 +31,19 @@
               "core-concepts/aggregate-events",
               "core-concepts/schema-definition",
               "core-concepts/replication"
+            ]
+          },
+          {
+            "group": "Client SDKs",
+            "pages": [
+              "client-sdks/overview",
+              "client-sdks/javascript",
+              "client-sdks/python",
+              "client-sdks/go",
+              "client-sdks/rust",
+              "client-sdks/java",
+              "client-sdks/php",
+              "client-sdks/dotnet"
             ]
           },
           {

@@ -1,0 +1,102 @@
+---
+title: "Python SDK"
+description: "Build EventDBX integrations with the fully-typed `eventdbx` package for sync and async apps."
+---
+
+The Python SDK targets standard CPython 3.9+ and ships both sync and async clients so you can use it inside Django, FastAPI, Airflow, or background workers. Under the hood it keeps a persistent Noise session with automatic retries and schema-aware payload helpers.
+
+## Install
+
+```bash
+pip install eventdbx
+# or with poetry
+poetry add eventdbx
+```
+
+Set `EVENTDBX_TOKEN`, `EVENTDBX_HOST`, and `EVENTDBX_TENANT` in your environment (or a `.env`) so services boot with the right credentials.
+
+## Quickstart
+
+```python
+import json
+from eventdbx import EventDBXClient
+
+with EventDBXClient(
+    host="127.0.0.1",
+    port=6363,
+    token="<token>",
+    tenant_id="default",
+) as client:
+    created = client.create(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_registered",
+        payload_json=json.dumps(
+            {"first_name": "Rosa", "last_name": "Imani", "email": "rosa@example.com"}
+        ),
+    )
+
+    client.apply(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_email_updated",
+        payload_json=json.dumps({"email": "rosa+primary@example.com"}),
+        metadata={"@actor": "svc-directory"},
+    )
+
+    latest = client.get("person", "p-110")
+    history = client.events("person", "p-110")
+    listing = client.list(take=50, type="person")
+```
+
+- The context manager handles connect/disconnect for short-lived scripts.
+- Payload helpers accept `dict` objects, JSON strings, or `pydantic.BaseModel` instances.
+- Exceptions derive from `eventdbx.errors.EventDBXError` so you can catch/retry specific cases.
+- Noise-based handshakes are automatic, so there’s no TLS switch or certificate bundle to manage.
+
+## Async I/O
+
+```python
+import asyncio
+from eventdbx.async_client import AsyncEventDBXClient
+
+async def stream_people():
+    client = AsyncEventDBXClient(token="<token>", tenant_id="people")
+    async with client:
+        async for event in client.stream(type="person", follow=True):
+            print(event.aggregate_id, event.event_type)
+
+asyncio.run(stream_people())
+```
+
+- Async client exposes `create`, `apply`, `patch`, and iterator-based streaming APIs identical to the sync version.
+- `stream(..., follow=True)` yields events as they land; pass `position` or `since` to resume.
+- Cancel the task to close sockets without waiting for the server to end the stream.
+
+## JSON Patch and lifecycle helpers
+
+```python
+client.patch(
+    aggregate_type="person",
+    aggregate_id="p-110",
+    event_type="person_registered",
+    patches=[{"op": "replace", "path": "/email", "value": "rosa@corp.example"}],
+)
+
+client.archive("person", "p-110")
+client.restore("person", "p-110")
+```
+
+Patches accept RFC 6902 operations; the SDK validates structure before sending them to the control plane.
+
+## Configuration patterns
+
+- Drop a `eventdbx.yaml` next to your service config and call `EventDBXClient.from_file("eventdbx.yaml")` to centralize hosts and retry policies.
+- Override retry budgets via `retry=RetryPolicy(max_attempts=8, timeout=3.0)`.
+- Inject custom `httpx` clients (for proxies or tracing) using the `transport` parameter.
+
+## Testing
+
+- Run `dbx sandbox start --tenant test --auto-reset` and point `EVENTDBX_HOST` to `127.0.0.1` for CI pipelines.
+- The package ships a pytest fixture `eventdbx_factory` in `eventdbx.testing` to mint ephemeral tenants and rollback automatically.
+- Serialize canned responses with `client.snapshot("tests/data/person.json")` to assert against golden files.

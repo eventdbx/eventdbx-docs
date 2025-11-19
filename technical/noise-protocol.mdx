@@ -50,6 +50,6 @@ Secrets live in your vault or MCP server (`secret://` URIs). Rotate PSKs with `m
 
 - Monitor `noise_handshake_failures_total`; spikes usually indicate mismatched PSKs or stale agent certificates.
 - Log handshake fingerprints only in debug mode—never expose raw keys.
-- For zero-trust networks, combine Noise with mutual TLS so each layer protects against different classes of attacks.
+- For zero-trust networks, layer Noise with WireGuard, IPSec, or hardware VPNs if regulators demand multiple independent controls.
 
-Noise complements, rather than replaces, TLS. Use it when you need lightweight, PSK-backed encryption or when regulators require explicit control over cryptographic primitives.
+Noise is the default transport security layer for EventDBX traffic. Reach for additional tunnels only when compliance or defense-in-depth policies call for a second encryption boundary.

@@ -1,5 +1,5 @@
 ---
-title: "Client SDKs"
+title: "Overview"
 description: "Use the official EventDBX client libraries across Python, Java, PHP, NodeJS, .NET, and Go."
 ---
 
@@ -82,33 +82,35 @@ from eventdbx import EventDBXClient
 with EventDBXClient(token="<token>", tenant_id="<tenant_id>") as client:
     # Create a brand-new aggregate via the control plane
     created = client.create(
-        aggregate_type="orders",
-        aggregate_id="ord_123",
-        event_type="created",
-        payload_json=json.dumps({"total": 42.15}),
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_registered",
+        payload_json=json.dumps(
+            {"first_name": "Ari", "last_name": "Diaz", "email": "ari@example.com"}
+        ),
     )
 
     # Append follow-up events to the aggregate
     updated = client.apply(
-        aggregate_type="orders",
-        aggregate_id="ord_123",
-        event_type="paid",
-        payload_json=json.dumps({"status": "paid"}),
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_email_updated",
+        payload_json=json.dumps({"email": "ari+alerts@example.com"}),
     )
 
     # List aggregates or fetch events for a specific aggregate
-    aggregates = client.list(take=50)
+    aggregates = client.list(take=50, type="person")
 
     # Apply JSON Patch documents to historical events
     patched = client.patch(
-        aggregate_type="orders",
-        aggregate_id="ord_123",
-        event_type="created",
-        patches=[{"op": "replace", "path": "/total", "value": 45.10}],
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_registered",
+        patches=[{"op": "replace", "path": "/last_name", "value": "Diaz-Garcia"}],
     )
 
     # Archive / restore lifecycle management
-    client.restore(aggregate_type="orders", aggregate_id="ord_123")
+    client.restore(aggregate_type="person", aggregate_id="p-110")
 ```
 
 Features:
@@ -135,8 +137,8 @@ EventDbx client = EventDbx.builder()
     .domain("payments-prod")
     .build();
 
-client.aggregate("invoice")
-      .apply("inv-991", "invoice_paid", Map.of("amount", 4200));
+client.aggregate("person")
+      .apply("p-110", "person_email_updated", Map.of("email", "jaya@example.com"));
 ```
 
 Features:
@@ -159,8 +161,8 @@ $client = new EventDbx\Client([
     'domain' => 'payments-prod',
 ]);
 
-$client->aggregate('invoice')->apply('inv-991', 'invoice_refunded', [
-    'payload' => ['amount' => 1000],
+$client->aggregate('person')->apply('p-110', 'person_email_updated', [
+    'payload' => ['email' => 'person@example.com'],
     'metadata' => ['@actor' => 'csr-22'],
 ]);
 ```
@@ -185,10 +187,9 @@ var client = new EventDbxClient(new EventDbxOptions {
     Domain = "payments-prod",
 });
 
-await client.Aggregates["invoice"]
-    .ApplyAsync("inv-991", "invoice_discount_applied", new {
-        amount = 300,
-        reason = "Loyalty"
+await client.Aggregates["person"]
+    .ApplyAsync("p-110", "person_email_updated", new {
+        email = "person@example.com"
     });
 ```
 
@@ -212,9 +213,9 @@ cli := eventdbx.NewClient(eventdbx.Config{
     Domain: "payments-prod",
 })
 
-err := cli.Aggregate("invoice").Apply(ctx, "inv-991", "invoice_settled", eventdbx.Event{
-    Payload: map[string]any{"amount": 4200},
-    Metadata: map[string]any{"@actor": "svc-clearing"},
+err := cli.Aggregate("person").Apply(ctx, "p-110", "person_email_updated", eventdbx.Event{
+    Payload: map[string]any{"email": "person@example.com"},
+    Metadata: map[string]any{"@actor": "svc-directory"},
 })
 ```
 
@@ -253,15 +254,15 @@ async fn main() -> eventdbx_client::Result<()> {
     let client = EventDbxClient::connect(config).await?;
 
     let append = AppendEventRequest::new(
-        "invoice",
-        "inv-991",
-        "invoice_paid",
-        json!({ "amount": 4200 }),
+        "person",
+        "p-110",
+        "person_registered",
+        json!({ "first_name": "Nia", "last_name": "Patel" }),
     );
     client.append_event(append).await?;
 
     let aggregates = client
-        .list_aggregates(ListAggregatesOptions::default())
+        .list_aggregates(ListAggregatesOptions::default().aggregate_type("person"))
         .await?;
     println!("Aggregates returned: {}", aggregates.aggregates.len());
 

@@ -1,0 +1,304 @@
+---
+title: "JavaScript SDK"
+description: "Interact with EventDBX from Node.js, TypeScript, and Edge runtimes using the eventdbxjs client."
+---
+
+The JavaScript SDK (`eventdbxjs`) is a native Node-API addon (via [`napi-rs`](https://napi.rs/)) that speaks directly to the EventDBX control socket over TCP/Cap’n Proto. It targets Node.js services, serverless API routes, and any runtime that exposes standard TCP primitives.
+
+## Feature highlights
+
+- Plug-and-play TCP client with optional token authentication.
+- JSON (de)serialisation for aggregate snapshots and event envelopes.
+- RFC 6902 JSON Patch helpers baked into `client.patch`.
+- Async/await-friendly API surface with Promise-based helpers.
+- Automatic retries with configurable exponential backoff.
+- Cross-platform builds covering macOS, Linux, Windows, and WASI targets.
+
+## Install
+
+```bash
+npm install eventdbxjs
+# or
+pnpm add eventdbxjs
+```
+
+<Note>
+  Requires Node.js 18+ or any runtime that exposes WHATWG `fetch`, Web Crypto
+  APIs, and raw TCP access to port 6363.
+</Note>
+
+## Initialize a client
+
+```ts
+import { createClient } from "eventdbxjs";
+
+const client = createClient({
+  ip: process.env.EVENTDBX_HOST ?? "127.0.0.1",
+  port: Number(process.env.EVENTDBX_PORT) || 6363,
+  token: process.env.EVENTDBX_TOKEN,
+  tenantId: process.env.EVENTDBX_TENANT_ID ?? "default",
+  verbose: false,
+  retry: {
+    attempts: 3,
+    initialDelayMs: 100,
+    maxDelayMs: 1_000,
+  },
+});
+
+await client.connect();
+```
+
+`createClient` falls back to environment variables when options are omitted. Set `EVENTDBX_HOST`, `EVENTDBX_PORT`, `EVENTDBX_TOKEN`, and `EVENTDBX_TENANT_ID` (for multi-tenant deployments) to avoid hardcoding credentials in code, and opt into retries by passing a `retry` object.
+
+- Want the TypeScript surface area? The SDK exports the core client class and helper types for strongly typed integrations.
+
+```ts
+export type JsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type JsonPatch =
+  | { op: "add" | "replace" | "test"; path: string; value: JsonValue }
+  | { op: "remove"; path: string }
+  | { op: "move" | "copy"; from: string; path: string };
+
+export interface RetryOptions {
+  attempts?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+export interface ClientOptions {
+  ip?: string;
+  port?: number;
+  token?: string;
+  tenantId?: string;
+  verbose?: boolean;
+  retry?: RetryOptions;
+}
+
+export interface ClientEndpoint {
+  ip: string;
+  port: number;
+}
+
+export interface AggregateSortInput {
+  field: string;
+  descending?: boolean;
+}
+
+export interface PageOptions {
+  cursor?: string;
+  take?: number;
+  includeArchived?: boolean;
+  archivedOnly?: boolean;
+  token?: string;
+  filter?: string;
+  sort?: Array<AggregateSortInput>;
+}
+
+export interface PageResult {
+  items: Array<JsonValue>;
+  nextCursor?: string;
+}
+
+export interface AppendOptions {
+  payload?: any;
+  metadata?: any;
+  note?: string;
+  token?: string;
+}
+
+export interface CreateAggregateOptions {
+  token?: string;
+  payload?: any;
+  metadata?: any;
+  note?: string;
+}
+
+export interface SetArchiveOptions {
+  token?: string;
+  comment?: string;
+}
+
+export interface PatchOptions {
+  metadata?: any;
+  note?: string;
+  token?: string;
+}
+
+export interface Aggregate<TState = JsonValue> {
+  aggregateType: string;
+  aggregateId: string;
+  version: number;
+  state: TState;
+  merkleRoot: string;
+  archived: boolean;
+}
+
+export interface Event<TPayload = JsonValue> {
+  aggregateType: string;
+  aggregateId: string;
+  eventType: string;
+  version: number;
+  sequence: number;
+  payload: TPayload;
+  metadata: {
+    eventId: string;
+    createdAt: string;
+    issuedBy?: { group?: string; user?: string };
+    note?: string | null;
+  };
+  hash: string;
+  merkleRoot: string;
+}
+
+export declare class DbxClient {
+  constructor(options?: ClientOptions | undefined | null);
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  isConnected(): Promise<boolean>;
+  get endpoint(): ClientEndpoint;
+  list(
+    aggregateType?: string | undefined | null,
+    options?: PageOptions | undefined | null
+  ): Promise<PageResult>;
+  get(aggregateType: string, aggregateId: string): Promise<any | null>;
+  select(
+    aggregateType: string,
+    aggregateId: string,
+    fields: Array<string>
+  ): Promise<any | null>;
+  events(
+    aggregateType: string,
+    aggregateId: string,
+    options?: PageOptions | undefined | null
+  ): Promise<PageResult>;
+  apply(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    options?: AppendOptions | undefined | null
+  ): Promise<any>;
+  create(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    options?: CreateAggregateOptions | undefined | null
+  ): Promise<any>;
+  archive(
+    aggregateType: string,
+    aggregateId: string,
+    options?: SetArchiveOptions | undefined | null
+  ): Promise<any>;
+  restore(
+    aggregateType: string,
+    aggregateId: string,
+    options?: SetArchiveOptions | undefined | null
+  ): Promise<any>;
+  patch(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    operations: Array<JsonPatch>,
+    options?: PatchOptions | undefined | null
+  ): Promise<any>;
+}
+
+export declare function createClient(
+  options?: ClientOptions | undefined | null
+): DbxClient;
+```
+
+Filters use the same SQL-like shorthand as the EventDBX server (`field = value AND other_field > 10`), and sort fields accept names such as `aggregateType`, `aggregateId`, `version`, `merkleRoot`, and `archived`. Each entry in `PageResult.items` is the aggregate snapshot or event payload returned by the control socket. The generated `index.d.ts` file still types these payloads as `any`, but the runtime values follow the `Aggregate` and `Event` shapes shown above.
+
+## Runtime configuration
+
+| Variable             | Default     | Description                                               |
+| -------------------- | ----------- | --------------------------------------------------------- |
+| `EVENTDBX_HOST`      | `127.0.0.1` | Hostname or IP address of the control socket.             |
+| `EVENTDBX_PORT`      | `6363`      | TCP port that hosts the control plane.                    |
+| `EVENTDBX_TOKEN`     | _empty_     | Authentication token that the client forwards on connect. |
+| `EVENTDBX_TENANT_ID` | _empty_     | Tenant identifier included in the handshake.              |
+
+Set these variables or pass explicit overrides through `createClient`. Multi-tenant deployments always require `tenantId` (or `EVENTDBX_TENANT_ID`) so the server routes control requests correctly.
+
+### Retry configuration
+
+Transport-level failures (socket resets, Cap’n Proto decode errors, etc.) can be retried automatically. Retries are disabled by default (`attempts = 1`), so opt in by setting the `retry` object:
+
+```ts
+const client = createClient({
+  token: process.env.EVENTDBX_TOKEN,
+  retry: {
+    attempts: 4, // total tries = initial attempt + (attempts - 1) retries
+    initialDelayMs: 100,
+    maxDelayMs: 2_000,
+  },
+});
+```
+
+Backoff doubles per retry until `maxDelayMs` is hit. Logical server errors (validation failures, authorization errors, etc.) still bubble to your application immediately.
+
+## Shape It (write actions)
+
+```ts
+// create – register a new aggregate + first event in one call
+await client.create("person", "p-110", "person_registered", {
+  payload: {
+    first_name: "Jaya",
+    last_name: "Singh",
+    email: "jaya@example.com",
+  },
+  metadata: {
+    "@actor": "svc-directory",
+    note: "person created by hi@example.com",
+  },
+});
+
+// apply – append events to an existing aggregate
+await client.apply("person", "p-110", "person_email_updated", {
+  payload: { email: "jaya+alerts@example.com" },
+});
+
+// patch – apply RFC 6902 JSON patches to historical payloads
+await client.patch("person", "p-110", "person_registered", [
+  { op: "replace", path: "/first_name", value: "Jayah" },
+]);
+
+// archive / restore – toggle write access while keeping reads online
+await client.archive("person", "p-110", {
+  comment: "big beautiful comment",
+});
+await client.restore("person", "p-110");
+```
+
+## See It (read actions)
+
+```ts
+// get – fetch the latest aggregate snapshot and metadata
+type Person = { first_name: string; last_name: string; email: string };
+const state: Person = await client.get("person", "p-110");
+
+// list – paginate aggregates with filters, sort, and cursor helpers
+const { items: people, nextCursor } = await client.list("person", {
+  take: 50,
+  cursor: "a:person:xxx",
+  filter: "person.status = true AND person.last_name = 'thach'",
+});
+
+// select – project fields without returning the rest of the payload
+const summary = await client.select("person", "p-110", [
+  "first_name",
+  "last_name",
+]);
+
+// events – pull the full envelope stream
+const { items: history } = await client.events("person", "p-110");
+```
+
+Use the returned `nextCursor` whenever `list` or `events` needs to resume pagination.

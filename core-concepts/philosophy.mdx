@@ -24,7 +24,7 @@ EventDBX centers on append-only truth, reproducible state, and integrations that
 ## Security
 
 - Mint Ed25519 tokens per role, rotate them regularly, and scope CLI commands tightly.
-- Terminate TLS (or mTLS) at the daemon and plugins so credentials never cross plaintext.
+- Enforce the built-in Noise handshakes at the daemon and plugins so credentials never cross plaintext.
 - Treat plugin credentials as first-class secrets with rotation and audit hooks.
 
 [Deep dive → Security](./security)

@@ -24,7 +24,7 @@ Plugins dequeue committed events, transform the payload slices they care about, 
 ## TCP
 
 - Stream events over raw sockets when latency matters most.
-- Wrap the channel in TLS, WireGuard, or SSH tunnels if the network is untrusted.
+- Wrap the channel in the built-in Noise_XX handshake, WireGuard, or SSH tunnels if the network is untrusted.
 - Tune buffer sizes, batch counts, and concurrency to match consumer throughput.
 
 [Deep dive → TCP plugin](./plugins/tcp)

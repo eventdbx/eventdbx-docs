@@ -1,0 +1,102 @@
+---
+title: "Rust SDK"
+description: "Tokio-native EventDBX client with strongly typed payload builders and tracing hooks."
+---
+
+The Rust crate (`eventdbx-client`) exposes async/await primitives, request builders, and optional features for telemetry and test tooling. It works with stable Rust 1.70+ and tokio 1.0.
+
+## Install
+
+```bash
+cargo add eventdbx-client
+# enable extras
+target.'cfg(test)'.dependencies.eventdbx-client = { version = "0.5", features = ["telemetry", "test-utils"] }
+```
+
+## Connect and append events
+
+```rust
+use eventdbx_client::{
+    AppendEventRequest, ClientConfig, EventDbxClient, ListAggregatesOptions,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, to_value};
+use std::time::Duration;
+
+#[derive(Serialize, Deserialize)]
+struct PersonRegistered {
+    first_name: String,
+    last_name: String,
+    email: String,
+}
+
+#[tokio::main]
+async fn main() -> eventdbx_client::Result<()> {
+    let config = ClientConfig::builder()
+        .host("127.0.0.1")
+        .tenant("people")
+        .token(std::env::var("EVENTDBX_TOKEN")?)
+        .port(6363)
+        .timeout(Duration::from_secs(5))
+        .build();
+
+    let client = EventDbxClient::connect(config).await?;
+
+    let append = AppendEventRequest::new(
+        "person",
+        "p-110",
+        "person_registered",
+        to_value(PersonRegistered {
+            first_name: "Nia".into(),
+            last_name: "Patel".into(),
+            email: "nia@example.com".into(),
+        })?,
+    )
+    .metadata(json!({ "@actor": "svc-directory" }));
+
+    client.append_event(append).await?;
+
+    let aggregates = client
+        .list_aggregates(ListAggregatesOptions::default().aggregate_type("person"))
+        .await?;
+    println!("returned {} aggregates", aggregates.aggregates.len());
+
+    Ok(())
+}
+```
+
+- Builders enforce required fields at compile time and keep payloads strongly typed via `serde`.
+- Configure retries, Noise session parameters, and keepalive intervals through `ClientConfig::builder()`.
+
+## Read models and projections
+
+```rust
+let state = client.get_state::<PersonRegistered>("person", "p-110").await?;
+let select = client
+    .select_fields("person", "p-110", ["payload.email", "metadata.@actor"])
+    .await?;
+```
+
+- `get_state::<T>` automatically deserializes payloads into domain structs.
+- `select_fields` returns sparse JSON for read-heavy paths where you only need part of the aggregate.
+
+## Tracing and metrics
+
+Enable the `telemetry` feature to wire into `tracing` and `metrics` crates:
+
+```rust
+let client = EventDbxClient::connect(
+    ClientConfig::new("127.0.0.1", token)
+        .with_tracing(true)
+        .with_metrics(true),
+)
+.await?;
+```
+
+The client emits spans for every API operation and records per-call latency and retry counters.
+
+## Testing support
+
+- `eventdbx_client::testkit::Sandbox` boots an ephemeral daemon for integration tests and tears it down automatically.
+- `EventDbxClient::fake()` returns a deterministic stub you can seed with canned aggregates.
+- Use `AppendEventRequest::from_fixture("tests/fixtures/person.json")` to replay JSON fixtures into the sandbox.

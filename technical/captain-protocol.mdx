@@ -3,11 +3,11 @@ title: "Cap’n Proto"
 description: "Deep dive into the Cap’n Proto transport protocol powering replication."
 ---
 
-Captain is EventDBX’s replication protocol. It runs over TCP/TLS, multiplexes multiple streams, and keeps latency low even when nodes are far apart.
+Captain is EventDBX’s replication protocol. It runs over TCP with a baked-in Noise_XX handshake, multiplexes multiple streams, and keeps latency low even when nodes are far apart.
 
 ## Handshake
 
-1. Client opens a TLS connection and sends a `HELLO` frame with domain, token fingerprint, and protocol version.
+1. Client completes the Noise handshake and then sends a `HELLO` frame with domain, token fingerprint, and protocol version.
 2. Server replies with `ACCEPT` plus configuration (max chunk size, compression, features).
 3. Both sides exchange Merkle roots for the requested aggregates to detect drift before transferring data.
 

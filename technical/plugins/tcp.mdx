@@ -12,12 +12,12 @@ The TCP plugin is the fastest way to push events to consumers that you control. 
 type = "tcp"
 host = "risk-broker.internal"
 port = 7075
-tls = true
+noise_profile = "default"
 selector = { domain = "payments", include_payload = true, include_snapshot = false }
 buffer = { max_events = 256, flush_interval_ms = 50 }
 ```
 
-Set `tls=false` only when the link is already encrypted (WireGuard, SSH tunnel).
+`noise_profile` references the shared Noise settings you defined under `[noise.*]`. Leave it unset only when the link already runs inside another encrypted tunnel (WireGuard, SSH, etc.).
 
 ## Message format
 
@@ -38,7 +38,7 @@ Switch to JSON by setting `encoding = "json"` if you prefer readability over siz
 
 ## Security
 
-When TLS is disabled, wrap the connection:
+When you skip the built-in Noise handshake, wrap the connection:
 
 ```bash
 ssh -N -L 7075:risk-broker.internal:7075 bastion

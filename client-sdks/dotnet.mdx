@@ -1,0 +1,89 @@
+---
+title: ".NET SDK"
+description: "Call EventDBX from ASP.NET Core, worker services, and background jobs using the EventDbx.Client package."
+---
+
+The .NET SDK supports .NET 6+, runs on Windows/Linux/macOS, and exposes both synchronous and asynchronous APIs. It integrates with dependency injection, Polly resilience libraries, and source generators for typed aggregates.
+
+## Install
+
+```powershell
+dotnet add package EventDbx.Client --version 0.5.0
+```
+
+## Configure and connect
+
+```csharp
+using EventDbx.Client;
+using EventDbx.Client.Options;
+
+var options = new EventDbxOptions
+{
+    Host = builder.Configuration["EventDbx:Host"] ?? "127.0.0.1",
+    Port = builder.Configuration.GetValue("EventDbx:Port", 6363),
+    Token = builder.Configuration["EventDbx:Token"],
+    Tenant = builder.Configuration["EventDbx:Tenant"] ?? "default",
+};
+
+var client = new EventDbxClient(options);
+await client.ConnectAsync();
+```
+
+Register the client once per application and reuse it; connections are thread-safe and multiplex requests.
+Noise handshakes are negotiated automatically, so there’s no TLS toggle to manage.
+
+## Write and read aggregates
+
+```csharp
+await client.Aggregate("person")
+    .CreateAsync("p-110", "person_registered", new
+    {
+        firstName = "Sora",
+        lastName = "Kim",
+        email = "sora@example.com"
+    }, metadata: new { @actor = "svc-directory" });
+
+await client.Aggregate("person")
+    .ApplyAsync("p-110", "person_email_updated", new { email = "sora+primary@example.com" });
+
+var state = await client.Aggregate("person").GetAsync<Person>("p-110");
+var history = await client.Aggregate("person").EventsAsync("p-110");
+```
+
+- Anonymous types serialize to JSON automatically; use records or classes for compile-time safety.
+- `GetAsync<T>` deserializes payloads, metadata, and snapshot fields into typed objects.
+
+## Dependency injection + Polly
+
+```csharp
+builder.Services.AddEventDbx(builder.Configuration);
+
+builder.Services.AddResilientEventDbx(options =>
+{
+    options.RetryCount = 5;
+    options.Timeout = TimeSpan.FromSeconds(3);
+    options.Backoff = Backoff.Exponential();
+});
+```
+
+- `AddEventDbx` registers `IEventDbxClient`, health checks, and typed client factories.
+- `AddResilientEventDbx` wires Polly retry/circuit-breaker policies for every call.
+
+## JSON Patch + lifecycle helpers
+
+```csharp
+await client.Aggregate("person")
+    .PatchAsync("p-110", "person_registered", new[]
+    {
+        new JsonPatchOperation("replace", "/last_name", "Kim-Park"),
+    });
+
+await client.Aggregate("person").ArchiveAsync("p-110");
+await client.Aggregate("person").RestoreAsync("p-110");
+```
+
+## Testing
+
+- Use `EventDbxClientFactory.CreateInMemory()` to stub the transport in unit tests.
+- Integration tests can call `dbx sandbox start --tenant dotnet-tests --auto-reset` inside `IHostedService` fixtures.
+- Source generators (`EventDbx.Client.Generators`) build strongly typed aggregate helpers you can share between production code and tests.

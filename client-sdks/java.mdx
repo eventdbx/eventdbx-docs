@@ -1,0 +1,116 @@
+---
+title: "Java SDK"
+description: "Write aggregates and build projections using the JVM-native EventDBX client."
+---
+
+The Java SDK targets Java 11+ and publishes to Maven Central under `com.eventdbx:eventdbx-client`. It exposes blocking, CompletableFuture, and Reactor-based APIs so you can integrate with Spring, Micronaut, Quarkus, or Vert.x stacks.
+
+## Install
+
+### Maven
+
+```xml
+<dependency>
+  <groupId>com.eventdbx</groupId>
+  <artifactId>eventdbx-client</artifactId>
+  <version>0.5.0</version>
+</dependency>
+```
+
+### Gradle (Kotlin DSL)
+
+```kotlin
+dependencies {
+  implementation("com.eventdbx:eventdbx-client:0.5.0")
+}
+```
+
+## Connect and write events
+
+```java
+import com.eventdbx.EventDbxClient;
+import com.eventdbx.models.AppendRequest;
+
+EventDbxClient client = EventDbxClient.builder()
+    .host(System.getenv().getOrDefault("EVENTDBX_HOST", "127.0.0.1"))
+    .port(6363)
+    .token(System.getenv("EVENTDBX_TOKEN"))
+    .tenant("payments-prod")
+    .build();
+
+AppendRequest request = AppendRequest.builder()
+    .aggregateType("person")
+    .aggregateId("p-110")
+    .eventType("person_registered")
+    .payload(Map.of(
+        "first_name", "Noor",
+        "last_name", "Ali",
+        "email", "noor@example.com"))
+    .metadata(Map.of("@actor", "svc-directory"))
+    .build();
+
+client.create(request);
+client.apply(request.toBuilder()
+    .eventType("person_email_updated")
+    .payload(Map.of("email", "noor+alerts@example.com"))
+    .build());
+```
+
+- Builders validate required fields and coerce numerics to canonical formats before submission.
+- `EventDbxClient` implements `AutoCloseable`; wrap it with try-with-resources for short-lived scripts.
+- Noise_XX handshakes are enabled automatically; there’s no TLS switch to manage.
+
+## Reactive + async workflows
+
+```java
+import reactor.core.publisher.Flux;
+
+Flux<EventRecord> stream = client.stream(builder -> builder
+    .aggregateType("person")
+    .fromTail()
+    .follow(true));
+
+stream.subscribe(record -> logger.info("{} -> {}", record.aggregateId(), record.eventType()));
+```
+
+- Reactor, Mutiny, and CompletableFuture adapters ship in the same artifact.
+- Backpressure-aware streaming keeps a single socket open and automatically resumes when network hiccups occur.
+- Pass `checkpointStore` to the stream builder to persist offsets (JDBC, Redis, S3, etc.).
+
+## Reads and projections
+
+```java
+AggregateState<Person> state = client.get("person", "p-110", Person.class);
+List<AggregateState<Person>> aggregates = client.list(opts -> opts
+    .aggregateType("person")
+    .limit(50));
+
+Projection projection = client.select("person", "p-110", SelectFields.of("payload.email", "metadata.@actor"));
+```
+
+`AggregateState<T>` wraps payload, metadata, Merkle hashes, and audit stamps so projection builders can emit complete DTOs.
+
+## JSON Patch and lifecycle controls
+
+```java
+client.patch(builder -> builder
+    .aggregateType("person")
+    .aggregateId("p-110")
+    .eventType("person_registered")
+    .patch(Map.of("op", "replace", "path", "/last_name", "value", "Ali-Khan")));
+
+client.archive("person", "p-110");
+client.restore("person", "p-110");
+```
+
+## Framework integrations
+
+- **Spring Boot starter**: add `com.eventdbx:eventdbx-spring-starter` to auto-configure the client, metrics, and health indicators.
+- **Micrometer**: metrics emit `eventdbx.client.latency` and `eventdbx.client.retries` tags; wire them into Prometheus or OTEL exporters.
+- **Jakarta EE**: register the client as an application-scoped bean and inject it into JAX-RS resources or CDI observers.
+
+## Testing
+
+- `EventDbxRule` spins up a sandbox daemon and exposes helper methods to seed aggregates before each test.
+- Use the packaged WireMock stubs (`eventdbx-testkit`) if you can’t run the daemon in CI; they mimic success/error envelopes.
+- Combine with Testcontainers to launch EventDBX, run migrations, and execute integration specs inside the same JVM.

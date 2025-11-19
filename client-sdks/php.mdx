@@ -1,0 +1,75 @@
+---
+title: "PHP SDK"
+description: "Integrate EventDBX from Laravel, Symfony, or vanilla PHP services using the eventdbx/eventdbx package."
+---
+
+The PHP SDK targets PHP 8.1+ with native attributes, enums, and readonly properties. It bundles Laravel and Symfony service providers plus PSR-18 compatible HTTP transport for custom runtimes.
+
+## Install
+
+```bash
+composer require eventdbx/eventdbx
+```
+
+Publish the config file in Laravel (`php artisan vendor:publish --tag=eventdbx-config`) or set environment variables (`EVENTDBX_HOST`, `EVENTDBX_TOKEN`, `EVENTDBX_TENANT`).
+
+## Quickstart
+
+```php
+<?php
+
+use EventDbx\Client;
+use EventDbx\Enums\Lifecycle;
+
+$client = new Client([
+    'host' => $_ENV['EVENTDBX_HOST'] ?? '127.0.0.1',
+    'port' => 6363,
+    'token' => $_ENV['EVENTDBX_TOKEN'],
+    'tenant' => 'people-prod',
+]);
+
+$client->create('person', 'p-110', 'person_registered', [
+    'payload' => [
+        'first_name' => 'Amina',
+        'last_name' => 'Lopez',
+        'email' => 'amina@example.com',
+    ],
+    'metadata' => ['@actor' => 'svc-directory'],
+]);
+
+$client->apply('person', 'p-110', 'person_email_updated', [
+    'payload' => ['email' => 'amina+vip@example.com'],
+]);
+
+$state = $client->get('person', 'p-110');
+$events = $client->events('person', 'p-110');
+```
+
+- Payloads accept arrays, `JsonSerializable` objects, or typed DTOs implementing `EventPayload`.
+- Responses return associative arrays plus helper objects (`AggregateState`, `EventRecord`) when using typed mode.
+- Noise_XX handshakes run by default, so there are no TLS flags to configure.
+
+## JSON Patch and lifecycle helpers
+
+```php
+$client->patch('person', 'p-110', 'person_registered', [
+    ['op' => 'replace', 'path' => '/last_name', 'value' => 'Perez-Lopez'],
+]);
+
+$client->transition('person', 'p-110', Lifecycle::ARCHIVED);
+$client->transition('person', 'p-110', Lifecycle::ACTIVE);
+```
+
+`Lifecycle` enum keeps archive/restore/read-only states centralized.
+
+## Framework integration
+
+- **Laravel**: inject `EventDbx\Client` via the container, configure broadcasting connectors, and use the `eventdbx:health` artisan command for liveness checks.
+- **Symfony**: enable the provided `EventDbxBundle` for autowiring + Messenger transport that streams events directly into handlers.
+- **PSR-18**: supply your own HTTP client/middleware stack using the `transport` option when running on platforms like RoadRunner or Bref.
+
+## Testing
+
+- `EventDbx\Testing\FakesClient` ships with the package; swap it with `$this->swap(Client::class, new FakesClient())` in Laravel tests.
+- Use `dbx sandbox start --tenant php-tests --auto-reset` during Pest/ PHPUnit runs for end-to-end coverage.
+- Snapshot events to disk via `$client->export('person', 'p-110', __DIR__.'/fixtures/person.json');` and re-import them later.
