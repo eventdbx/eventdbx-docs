@@ -3,100 +3,324 @@ title: "Python SDK"
 description: "Build EventDBX integrations with the fully-typed `eventdbx` package for sync and async apps."
 ---
 
-The Python SDK targets standard CPython 3.9+ and ships both sync and async clients so you can use it inside Django, FastAPI, Airflow, or background workers. Under the hood it keeps a persistent Noise session with automatic retries and schema-aware payload helpers.
+The Python SDK targets CPython 3.9+ and ships both synchronous and asynchronous clients so you can integrate with Django, FastAPI, Airflow, Celery, or background workers. It keeps a persistent Noise session with automatic retries, typed envelopes, and schema-aware payload helpers.
+
+## Feature highlights
+
+- Sync and async clients share typed aggregate and event records that work inside web frameworks and worker services.
+- Noise-based transports speak directly to the control socket over TCP without a separate TLS configuration step.
+- JSON/dict/Pydantic payload helpers plus RFC 6902 patch utilities built into `client.patch`.
+- Cursor-based pagination with the same filter grammar used by the EventDBX server.
+- Streaming APIs for CDC workers with backpressure-aware iterators.
+- Exception hierarchy rooted in `eventdbx.errors.EventDBXError` for targeted retry logic.
 
 ## Install
 
 ```bash
-pip install eventdbx
+python -m pip install --upgrade pip
+python -m pip install eventdbx
 # or with poetry
 poetry add eventdbx
 ```
 
-Set `EVENTDBX_TOKEN`, `EVENTDBX_HOST`, and `EVENTDBX_TENANT` in your environment (or a `.env`) so services boot with the right credentials.
+<Note>
+  `pycapnp` depends on Cap'n Proto system libraries. Install them first
+  (`brew install capnp` on macOS or `apt-get install capnproto libcapnp-dev`
+  on Debian/Ubuntu) before running `pip install`.
+</Note>
 
-## Quickstart
+## Connect and configure
 
 ```python
 import json
-from eventdbx import EventDBXClient
+import os
+from eventdbx import EventDBXClient, RetryOptions
 
 with EventDBXClient(
-    host="127.0.0.1",
-    port=6363,
-    token="<token>",
-    tenant_id="default",
+    token=os.getenv("EVENTDBX_TOKEN", "control_token"),
+    tenant_id=os.getenv("EVENTDBX_TENANT", "tenant-123"),
+    host=os.getenv("EVENTDBX_HOST", "127.0.0.1"),
+    port=int(os.getenv("EVENTDBX_PORT", "6363")),
+    verbose=True,  # mirror verbose_responses = true on the server
+    retry=RetryOptions(attempts=3, initial_delay_ms=100, max_delay_ms=1_000),
 ) as client:
     created = client.create(
-        aggregate_type="person",
-        aggregate_id="p-110",
-        event_type="person_registered",
-        payload_json=json.dumps(
-            {"first_name": "Rosa", "last_name": "Imani", "email": "rosa@example.com"}
-        ),
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="created",
+        payload_json=json.dumps({"total": 42.15}),
     )
 
-    client.apply(
-        aggregate_type="person",
-        aggregate_id="p-110",
-        event_type="person_email_updated",
-        payload_json=json.dumps({"email": "rosa+primary@example.com"}),
-        metadata={"@actor": "svc-directory"},
+    updated = client.apply(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="paid",
+        payload_json=json.dumps({"status": "paid"}),
     )
 
-    latest = client.get("person", "p-110")
-    history = client.events("person", "p-110")
-    listing = client.list(take=50, type="person")
+    aggregates = client.list(take=50)
+    events_page = client.events(aggregate_type="orders", aggregate_id="ord_123")
+
+    latest = client.get(aggregate_type="orders", aggregate_id="ord_123")
+    projection = client.select(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        fields=["payload.total", "metadata.region"],
+    )
+    merkle_root = client.verify(aggregate_type="orders", aggregate_id="ord_123")
+
+    patched = client.patch(
+        aggregate_type="orders",
+        aggregate_id="ord_123",
+        event_type="created",
+        patches=[{"op": "replace", "path": "/total", "value": 45.10}],
+    )
+
+    client.archive(aggregate_type="orders", aggregate_id="ord_123", comment="customer request")
+    client.restore(aggregate_type="orders", aggregate_id="ord_123")
 ```
 
-- The context manager handles connect/disconnect for short-lived scripts.
-- Payload helpers accept `dict` objects, JSON strings, or `pydantic.BaseModel` instances.
-- Exceptions derive from `eventdbx.errors.EventDBXError` so you can catch/retry specific cases.
-- Noise-based handshakes are automatic, so there’s no TLS switch or certificate bundle to manage.
+`client.create(...)` bootstraps aggregates, `client.list(...)` paginates aggregates, and `client.events(...)` retrieves envelopes for a single aggregate. The client maintains a persistent Noise XX session over TCP and exchanges Cap'n Proto control messages under the hood. When you only need the client briefly, rely on the context manager (`with EventDBXClient(...) as client:`) to auto-connect and disconnect.
 
-## Async I/O
+`payload_json` accepts serialized JSON when you already have the string form. Pass `payload` objects (dicts or `pydantic.BaseModel` instances) when you prefer to let the SDK take care of serialization.
+
+### Connection lifecycle tips
+
+- Create one client per process (or per tenant) and reuse it so the Noise handshake and TCP socket stay warm.
+- Use the context manager for scripts and jobs, and wire `client.close()` into shutdown hooks for long-running servers.
+- Share the instantiated client through dependency injection or module-level caches to avoid reconnecting on every request.
+
+### Verbose responses
+
+`EventDBXClient` returns stored JSON payloads for mutation commands (`create`, `apply`, `patch`, `archive`, `restore`) so you can inspect the server's canonical view. Deployments that set `verbose_responses = false` on the server should mirror that behaviour in the SDK by passing `verbose=False`; those methods then resolve to boolean acknowledgements instead of payload blobs.
+
+```python
+client = EventDBXClient(token="control_token", tenant_id="tenant-123", verbose=False)
+assert client.archive(aggregate_type="orders", aggregate_id="ord_123") is True
+```
+
+### Async entry points
 
 ```python
 import asyncio
+import os
 from eventdbx.async_client import AsyncEventDBXClient
 
 async def stream_people():
-    client = AsyncEventDBXClient(token="<token>", tenant_id="people")
-    async with client:
+    async with AsyncEventDBXClient(
+        host=os.getenv("EVENTDBX_HOST", "127.0.0.1"),
+        port=6363,
+        token=os.getenv("EVENTDBX_TOKEN"),
+        tenant_id=os.getenv("EVENTDBX_TENANT", "default"),
+    ) as client:
         async for event in client.stream(type="person", follow=True):
-            print(event.aggregate_id, event.event_type)
+            print(event.aggregate_id, event.event_type, event.sequence)
 
 asyncio.run(stream_people())
 ```
 
-- Async client exposes `create`, `apply`, `patch`, and iterator-based streaming APIs identical to the sync version.
-- `stream(..., follow=True)` yields events as they land; pass `position` or `since` to resume.
-- Cancel the task to close sockets without waiting for the server to end the stream.
+The async client exposes the same `create`, `apply`, `patch`, `archive`, `restore`, `list`, and `events` methods as the sync version. Pass `position` or `cursor` to `stream` when you need to resume from a checkpoint.
 
-## JSON Patch and lifecycle helpers
+## Runtime configuration
+
+| Variable          | Default     | Description                                               |
+| ----------------- | ----------- | --------------------------------------------------------- |
+| `EVENTDBX_HOST`   | `127.0.0.1` | Hostname or IP address of the control socket.             |
+| `EVENTDBX_PORT`   | `6363`      | TCP port that hosts the control plane.                    |
+| `EVENTDBX_TOKEN`  | _empty_     | Authentication token that the client forwards on connect. |
+| `EVENTDBX_TENANT` | _empty_     | Tenant identifier included in the handshake.              |
+
+Set these variables or pass explicit overrides when constructing the client. Multi-tenant deployments always require `tenant_id` (or `EVENTDBX_TENANT`) so the server routes control requests correctly.
+
+## Manage authentication and tenancy
+
+Keep a client per tenant and override tokens per call when impersonating end-user sessions.
 
 ```python
-client.patch(
-    aggregate_type="person",
-    aggregate_id="p-110",
-    event_type="person_registered",
-    patches=[{"op": "replace", "path": "/email", "value": "rosa@corp.example"}],
-)
+import os
+from functools import lru_cache
 
-client.archive("person", "p-110")
-client.restore("person", "p-110")
+@lru_cache(maxsize=16)
+def client_for(tenant_id: str) -> EventDBXClient:
+    client = EventDBXClient(tenant_id=tenant_id, token=os.getenv("EVENTDBX_TOKEN"))
+    client.connect()
+    return client
+
+def update_email(request, aggregate_id: str, email: str):
+    client = client_for(request.state.tenant_id)
+    session_token = request.headers.get("x-eventdbx-token")
+
+    client.apply(
+        aggregate_type="person",
+        aggregate_id=aggregate_id,
+        event_type="person_email_updated",
+        payload={"email": email},
+        metadata={"@actor": request.state.actor},
+        token=session_token,
+    )
 ```
 
-Patches accept RFC 6902 operations; the SDK validates structure before sending them to the control plane.
+Use this pattern when privileged services share infrastructure with user-triggered API routes—each call can reuse the tenant-specific client while scoping authorization via the optional `token` argument.
 
-## Configuration patterns
+## Retry configuration
 
-- Drop a `eventdbx.yaml` next to your service config and call `EventDBXClient.from_file("eventdbx.yaml")` to centralize hosts and retry policies.
-- Override retry budgets via `retry=RetryPolicy(max_attempts=8, timeout=3.0)`.
-- Inject custom `httpx` clients (for proxies or tracing) using the `transport` parameter.
+Transport-level failures (socket resets, Cap'n Proto decode errors, etc.) can be retried automatically. Retries are disabled by default, so opt in with `RetryOptions`.
+
+```python
+from eventdbx import EventDBXClient, RetryOptions
+
+client = EventDBXClient(
+    token=os.getenv("EVENTDBX_TOKEN"),
+    tenant_id=os.getenv("EVENTDBX_TENANT"),
+    retry=RetryOptions(
+        attempts=4,           # initial try + 3 retries
+        initial_delay_ms=100,
+        max_delay_ms=2_000,
+    ),
+)
+```
+
+Backoff doubles per retry until `max_delay_ms` is hit. Logical server errors (validation failures, authorization errors, etc.) bubble up immediately so you can surface them to end users.
+
+## Write aggregates and events
+
+```python
+from eventdbx import EventDBXClient
+
+with EventDBXClient(token="<token>", tenant_id="default") as client:
+    # create – register a new aggregate + first event in one call
+    client.create(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_registered",
+        payload={
+            "first_name": "Rosa",
+            "last_name": "Imani",
+            "email": "rosa@example.com",
+        },
+        metadata={
+            "@actor": "svc-directory",
+            "note": "person created by hi@example.com",
+        },
+    )
+
+    # apply – append events to an existing aggregate
+    client.apply(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_email_updated",
+        payload={"email": "rosa+primary@example.com"},
+    )
+
+    # patch – apply RFC 6902 JSON patches to historical payloads
+    client.patch(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        event_type="person_registered",
+        patches=[{"op": "replace", "path": "/email", "value": "rosa@corp.example"}],
+    )
+
+    # archive / restore – toggle write access while keeping reads online
+    client.archive("person", "p-110")
+    client.restore("person", "p-110")
+```
+
+`create` seeds a snapshot and the first event atomically. `apply` appends new events, `patch` issues RFC 6902 operations against historical payloads, and `archive`/`restore` control write access while preserving history.
+
+## Read aggregates and events
+
+```python
+with EventDBXClient(token="<token>", tenant_id="default") as client:
+    # get – fetch the latest aggregate snapshot and metadata
+    state = client.get("person", "p-110")
+
+    # list – paginate aggregates with filters, sort, and cursor helpers
+    listing = client.list(
+        type="person",
+        take=50,
+        cursor="a:person:xxx",
+        filter="person.status = true AND person.last_name = 'imani'",
+    )
+
+    # events – pull the full envelope stream
+    history = client.events("person", "p-110")
+
+    # select – return sparse projections
+    summary = client.select(
+        aggregate_type="person",
+        aggregate_id="p-110",
+        fields=["payload.email", "metadata.@actor"],
+    )
+
+    # verify – recompute hashes and return the Merkle root
+    merkle_root = client.verify(aggregate_type="person", aggregate_id="p-110")
+```
+
+Use `get` when you need the entire snapshot, `list` to traverse many aggregates, `events` for on-demand history, `select` for sparse projections, and `verify` whenever you need to recompute hashes or assert integrity. The async streaming example above covers CDC-style consumers that need live updates.
+
+## Filters, sorting, and pagination
+
+Filters use the same SQL-like shorthand as the EventDBX server (`field = value AND other_field > 10`), and sort fields accept names such as `aggregateType`, `aggregateId`, `version`, `merkleRoot`, and `archived`. Each entry in the returned collection is the aggregate snapshot or event payload provided by the control socket.
+
+```python
+page = client.list(
+    type="person",
+    take=25,
+    include_archived=False,
+    filter="person.archived = false AND person.last_name LIKE 'S%'",
+    sort=[
+        {"field": "aggregateId"},
+        {"field": "version", "descending": True},
+    ],
+)
+
+if page.next_cursor:
+    next_page = client.list(type="person", cursor=page.next_cursor)
+```
+
+`include_archived`, `archived_only`, and request-scoped `token` overrides are part of the list/event options. Always feed the returned cursor back into the next call when you need to resume pagination after hitting server-side limits.
+
+## Sync and async API surface
+
+- `EventDBXClient` (sync) and `AsyncEventDBXClient` (async) share the same method names, and both act as context managers.
+- Responses expose typed attributes such as `aggregate_type`, `aggregate_id`, `payload`, `metadata`, `version`, `sequence`, `archived`, and `merkle_root`.
+- Retry helpers (`RetryOptions`) and error types (`eventdbx.errors.EventDBXError`, `RetryableError`, etc.) give you fine-grained control over resilience.
+- Pagination helpers return objects with `items` and `next_cursor` so IDEs can autocomplete fields across sync and async workflows.
+
+## Control plane schemas & Noise helpers
+
+When you need to work with the lower-level Cap'n Proto messages, import the bundled schemas and builders:
+
+```python
+from eventdbx.control_schema import build_control_hello
+
+hello = build_control_hello(protocol_version=1, token="api", tenant_id="tenant")
+serialized = hello.to_bytes()
+```
+
+Encrypted transport helpers wrap the `noiseprotocol` library so you can stand up `Noise_XX_25519_AESGCM_SHA256` sessions when testing custom transports or debugging the control plane handshake.
+
+```python
+from eventdbx.noise import NoiseSession
+
+initiator = NoiseSession(is_initiator=True)
+responder = NoiseSession(is_initiator=False)
+
+step1 = initiator.write_message()
+responder.read_message(step1)
+```
 
 ## Testing
 
 - Run `dbx sandbox start --tenant test --auto-reset` and point `EVENTDBX_HOST` to `127.0.0.1` for CI pipelines.
-- The package ships a pytest fixture `eventdbx_factory` in `eventdbx.testing` to mint ephemeral tenants and rollback automatically.
-- Serialize canned responses with `client.snapshot("tests/data/person.json")` to assert against golden files.
+- The package ships a pytest fixture `eventdbx_factory` in `eventdbx.testing` to mint ephemeral tenants and roll back automatically.
+- Serialize canned responses with `client.snapshot("tests/data/person.json")` to assert against golden files, or load them later to reseed aggregates.
+
+## Troubleshooting
+
+- `Getting requirements to build wheel ... error`: ensure Cap'n Proto is installed (`brew install capnp` or `apt-get install capnproto libcapnp-dev`) and retry `pip install pycapnp`. Installing the wheel inside your virtualenv ahead of time resolves most build issues.
+
+## Development & release
+
+- Create a virtual environment with `python -m venv .venv && source .venv/bin/activate`, install dev dependencies via `pip install -e .[dev]`, and run `pytest`.
+- Merges to `main` trigger `.github/workflows/publish.yml`, which builds wheels/sdists (`python -m build`) and publishes them to PyPI using `pypa/gh-action-pypi-publish`. Store the project-scoped PyPI API token in `PYPI_API_TOKEN` for releases.
