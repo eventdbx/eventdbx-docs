@@ -81,6 +81,7 @@ state, err := cli.Aggregate("person").Select(ctx, "p-110", []string{"payload.fir
 
 - `List` and `Select` paginate automatically and expose iterators when `Take` exceeds server limits.
 - `Select` returns sparse objects that only include requested fields, reducing payload size.
+- When sorting by `created_at` or `updated_at`, you can pass shorthand timestamp cursors (`ts:<aggregate_type>:<aggregate_id>`) with your list options; the server expands them into full timestamp tokens before paging.
 
 ## Streams and CDC workers
 

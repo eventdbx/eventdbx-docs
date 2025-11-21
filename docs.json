@@ -39,11 +39,8 @@
               "client-sdks/overview",
               "client-sdks/javascript",
               "client-sdks/python",
-              "client-sdks/go",
               "client-sdks/rust",
-              "client-sdks/java",
-              "client-sdks/php",
-              "client-sdks/dotnet"
+              "client-sdks/java"
             ]
           },
           {
@@ -106,7 +103,7 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/thachp/eventdbx"
+      "github": "https://github.com/eventdbx/eventdbx"
     }
   }
 }

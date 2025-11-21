@@ -5,10 +5,79 @@ description: "Organize work into bounded contexts and switch between them withou
 
 Domains keep schemas, aggregates, and replication schedules scoped to a single bounded context. Operators can hop between them instantly, but each remains isolated on disk so experiments never corrupt production roots.
 
-## Ability to switch between contexts
+Switching domains is a daily task for anyone running multiple environments (dev, staging, prod) or business units (payments, risk, fulfillment). EventDBX keeps every domain isolated on disk so context switches are quick yet safe.
 
-- Use `dbx checkout <domain>` to move between contexts while keeping local state, tokens, and logs separate.
-- Pair `dbx status` with naming conventions (e.g., `payments-prod`, `payments-dev`) so operators always know which root they are touching.
-- Promote or replicate contexts independently; watchers respect the active domain so migrations stay deterministic.
+EventDBX uses “domain” and “tenant” interchangeably: `dbx tenant list` enumerates the same contexts that `dbx checkout` activates.
 
-[Detailed outline → Ability to switch between context](../domain-context/ability-to-switch-between-context)
+## Checkout workflow
+
+```bash
+dbx tenant list
+#> tenant         shard       quota_mb  usage_mb  count
+#> payments-prod  shard-0013        30         0      1
+#> payments-dev   shard-0009         -         0      1
+
+dbx checkout payments-dev
+dbx status
+```
+
+`dbx tenant list` is the easiest way to discover available domains and where they live. `dbx checkout` updates the active RocksDB path, snapshots directory, config overrides, and default plugin namespace. Follow it with `dbx status` to confirm where commands will apply before you mutate data.
+
+## Attach remotes per domain
+
+Associate a remote endpoint while you switch contexts so replication commands have everything they need:
+
+```bash
+dbx checkout payments-prod \
+  --remote replica.acme.internal:6363 \
+  --token "$REPLICA_TOKEN" \
+  --remote-tenant acme-prod
+```
+
+`dbx checkout` persists the remote address, token, and remote tenant under the domain’s `remote.json`, so later `dbx push`/`dbx pull`/`dbx watch` calls can use the stored values without retyping credentials. Re-run `dbx checkout` with just `--remote`, `--token`, or `--remote-tenant` to rotate one piece, and add `--port` when the remote listens on a non-default socket.
+
+Common flags: `-c/--create` to make the domain if it does not exist, positional `NAME` or `-d/--domain` to pick the context, `--delete --force` for cleanups. Use host:port on `--remote` (defaults to port 6363 if omitted) and pair it with `--token` plus `--remote-tenant` when the remote hosts multiple tenants:
+
+```bash
+dbx checkout -c rc11 \
+  --remote 127.0.0.1:6464 \
+  --token "testng" \
+  --remote-tenant rc11
+```
+
+## Naming and structure tips
+
+- Prefix domains with the product or bounded context, suffix with the environment (`orders-prod`, `orders-staging`).
+- Let the configured data directory handle sharding; attach storage per shard if you want independent backup schedules instead of hard-coding per-domain paths.
+- Commit a `.dbx-domain` file at the root of each repo to remind developers which domain their scripts expect.
+
+## Replication awareness
+
+Replication jobs are domain-aware. A standby that tracks `payments-prod` retains its own queue offsets. When you switch to `payments-dev`, replication commands only touch that domain:
+
+```bash
+dbx checkout payments-dev
+dbx push dev-standby
+```
+
+Quick replication examples that reuse the remote address/token stored via `dbx checkout`:
+
+```bash
+# One-off sync to the configured remote (all aggregates)
+dbx push remote1
+
+# Pull updates back down (integrity checks run automatically)
+dbx pull remote1
+
+# Continuous streaming with safety checks
+dbx watch remote1 --mode push --background --skip-if-active
+dbx watch status remote1
+```
+
+This isolation prevents accidental promotion of the wrong dataset during incidents.
+
+## Multi-tenant operators
+
+If you host EventDBX for multiple customers, run one domain per tenant. Combine `dbx checkout` with shell prompts (`PS1`) or terminal titles that show the active domain so humans never confuse tenants. Automation should always pass `--domain` explicitly.
+
+The end result: you can switch contexts in seconds without worrying that your commands will leak into another environment or corrupt an unrelated business line.

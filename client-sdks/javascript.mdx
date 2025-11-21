@@ -221,6 +221,8 @@ if (firstPage.nextCursor) {
 
 `includeArchived`, `archivedOnly`, and request-scoped `token` overrides are part of the `PageOptions` passed to `list` and `events`. Always feed the returned `nextCursor` back into the next call when you need to resume pagination after hitting server-side page limits.
 
+When you sort aggregates by `created_at` or `updated_at`, you can use shorthand timestamp cursors with the same control socket used by `eventdbxjs`: pass `cursor: "ts:<aggregate_type>:<aggregate_id>"` alongside the timestamp sort and the server expands it into the full token (`ts:<field>:<order>:<scope>:<timestamp_ms>:...`) for you.
+
 ## TypeScript surface area
 
 The SDK exports helper types so you can strongly type payloads, retries, and pagination in your application.

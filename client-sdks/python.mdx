@@ -280,6 +280,8 @@ if page.next_cursor:
 
 `include_archived`, `archived_only`, and request-scoped `token` overrides are part of the list/event options. Always feed the returned cursor back into the next call when you need to resume pagination after hitting server-side limits.
 
+When sorting by `created_at` or `updated_at`, you can pass shorthand timestamp cursors (`cursor="ts:<aggregate_type>:<aggregate_id>"`) alongside the timestamp sort and the server will expand them into full tokens (`ts:<field>:<order>:<scope>:<timestamp_ms>:...`) before paging.
+
 ## Sync and async API surface
 
 - `EventDBXClient` (sync) and `AsyncEventDBXClient` (async) share the same method names, and both act as context managers.
