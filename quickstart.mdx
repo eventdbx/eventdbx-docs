@@ -71,8 +71,8 @@ Swap in the Python, Java, PHP, .NET, or Go SDKs described on the Client SDKs pag
 
 ## Next steps
 
-- **Snapshots and verification**: `dbx aggregate snapshot rebuild` refreshes state, and `dbx aggregate verify` recomputes Merkle roots when you need to prove integrity.
-- **Replication**: run `dbx watch standby` to stream changes to a standby node, or `dbx push/pull` for scheduled syncs.
+- **Snapshots and verification**: `dbx aggregate snapshot <aggregate> <id>` materializes the latest state, and `dbx aggregate verify` recomputes Merkle roots when you need to prove integrity.
+- **Replication**: run `dbx watch standby` to stream changes to a standby node, or `dbx push/pull` for one-off syncs.
 - **Plugins**: configure HTTP or TCP plugins to fan events out to downstream services once your domain is populated.
 
 <Note>Every CLI command accepts `--config <path>` if you need to target a custom configuration file or environment.</Note>

@@ -1,17 +1,17 @@
 ---
 title: "Overview"
-description: "Meet the event-sourced write-side database built for immutable audit trails and pluggable read models."
+description: "Event-sourced write-side database with append-only integrity, Merkle-verified audit trails, and pluggable read models for teams building event-driven apps."
 ---
 
-EventDBX is an append-only, event-sourced write store that keeps your aggregates verifiable, replicas aligned, and downstream systems hydrated without touching the write path. Instead of hand-building bespoke schemas up front, you capture events, validate them with Merkle-backed integrity checks, and fan them out through plugins that specialise in the read side.
+EventDBX is an append-only, event-sourced write database that keeps your aggregates verifiable, replicas aligned, and downstream systems hydrated without touching the write path. Instead of hand-building bespoke schemas up front, you capture events, validate them with Merkle-backed integrity checks, and fan them out through plugins that specialize in the read side.
 
-## Why teams pick EventDBX
+## Core Motivations
 
-- **Immutable, append-only core** – events land in RocksDB with Merkle trees per aggregate so you can verify state integrity at any time.
-- **CQRS-first design** – the engine focuses on the write side while plugins stream the slices (event, state, schema) your read models need.
-- **Schema enforcement on your terms** – switch between permissive prototyping and strict production validation with a single flag.
-- **Tenant-aware guardrails** – `dbx tenant quota set`/`clear` enforce per-tenant storage ceilings, and `dbx tenant list` reports live usage so noisy neighbours cannot starve shared clusters.
-- **Operationally simple** – domains isolate data, CLI commands cover schema/state management, and replication honors version + Merkle parity.
+EventDBX succeeds when it:
+
+- Enables developers to quickly build applications without hand-designing schemas or wrestling with ORMs; schemas stay an afterthought you tighten later.
+- Enforces task-based thinking over CRUD. Start from what customers tell you and persist what they know instead of designing tables first and training users to fit them; workflows stay aligned with intent.
+- Provides a trustworthy source of truth for other systems. The append-only event log plus Merkle verification prevents silent edits—no administrator can tweak a column without leaving evidence—so downstream systems can trust replicated histories instead of worrying about invisible hotfixes.
 
 <Tip>
   The CLI binary is `dbx`; older releases exposed an `eventdbx` alias, but `dbx`
@@ -19,6 +19,8 @@ EventDBX is an append-only, event-sourced write store that keeps your aggregates
 </Tip>
 
 ## Architecture at a glance
+
+EventDBX follows the CQRS first principle: isolate the write path (capture + validate + append) from read responsibilities (materialization, search, analytics) so each side can scale and evolve independently. EventDBX is deliberately write-path-first—plugins own the read models so writes stay fast, append-only, and verifiable.
 
 1. **Events in, state verified** – `dbx aggregate apply` validates payloads (when restriction is enabled), merges them into the aggregate snapshot, and appends the event. Per-aggregate Merkle trees detect tampering immediately.
 2. **Plugins out** – every committed event flows into a durable job queue. TCP/HTTP/log/process emitters decide which payload slices they care about, while queue backoff keeps delivery reliable.
@@ -43,7 +45,7 @@ EventDBX is an append-only, event-sourced write store that keeps your aggregates
 
 ## Performance snapshot
 
-EventDBX keeps throughput flat even as datasets grow past 10 M records thanks to RocksDB batching and hot-aggregate caching.
+EventDBX keeps throughput flat even as datasets grow past 50M records (~100 GB of storage) thanks to RocksDB batching and hot-aggregate caching.
 
 | Engine          | Throughput (ops/s) | Latency (µs)  | Notes                                                        |
 | --------------- | ------------------ | ------------- | ------------------------------------------------------------ |
@@ -52,4 +54,4 @@ EventDBX keeps throughput flat even as datasets grow past 10 M records thanks 
 | MongoDB 7       | 400 – 1 000        | 1.5 – 2.5     | Flexible JSON store with higher serialization cost.          |
 | SQL Server 2022 | 50 – 180           | 5 – 20        | Drops quickly past 100 K ops because of locking + B-trees.   |
 
-Benchmarks come from the [eventdbx-perf](https://github.com/thachp/eventdbx-perf) suite (Dockerized backends, single-threaded clients, datasets up to 10 M records).
+Benchmarks come from the [eventdbx-perf](https://github.com/eventdbx/eventdbx-perf) suite (Dockerized backends, single-threaded clients, datasets up to 50M records).

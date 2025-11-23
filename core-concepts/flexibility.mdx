@@ -27,7 +27,7 @@ dbx schema column add invoice amount --type decimal --required
 dbx restrict set strict       # lock in the evolved schema
 ```
 
-EventDBX never mutates historical payloads. Instead, new columns surface through snapshots and plugins once they appear often enough. Re-snapshotting an aggregate with `dbx aggregate snapshot rebuild <id>` lets you adopt the updated shape without replaying the full stream.
+EventDBX never mutates historical payloads. Instead, new columns surface through snapshots and plugins once they appear often enough. Re-snapshotting an aggregate with `dbx aggregate snapshot <aggregate> <id>` lets you adopt the updated shape without replaying the full stream.
 
 ## Route only the slices you need
 

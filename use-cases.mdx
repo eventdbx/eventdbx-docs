@@ -3,21 +3,21 @@ title: "Use Cases"
 description: "Map the domains where EventDBX’s immutable event log, schemas, and replication model shine."
 ---
 
-Below is an organized, wide-angle map of real-world scenarios where EventDBX removes friction, adds traceability, or both. Use it to spot overlaps with your domain or validate bets you are already making.
+Below is a structured overview of real-world systems where EventDBX reduces operational overhead or provides verifiable change history. Use it to identify parallels in your own architecture, validate design assumptions, or surface new patterns worth prototyping.
 
 ## Systems that require full historical reconstruction
 
 When knowing how the data changed is just as important as the latest state. You want to rewind time, inspect every mutation, and prove why the present looks the way it does.
 
-- Medical records and clinical decision systems
-- Financial transactions, ledgers, and accounting workflows
-- Livestock lifecycle tracking (birth, vaccination, weight, transfer, death)
-- Supply-chain checkpoints and custody transitions
-- Manufacturing logs covering every station on the line
-- Insurance claim histories
-- Customer support timelines
-- User activity / behavior trails
-- Audit logs for compliance reviews
+- Clinical records, diagnostic history, and treatment decisions
+- Financial flows: payments, ledger postings, and reconciliations
+- Livestock lifecycle tracking (birth, vaccination, weight, custody transitions)
+- Supply-chain custody by SKU/lot with location stamps
+- Manufacturing station logs with operator notes and calibration changes
+- Insurance claim histories, reopenings, and adjustments
+- Customer support timelines tied to entitlements and SLAs
+- User activity / behavior trails for DSARs and internal governance
+- Audit logs for compliance reviews (SOX, SOC 2, HIPAA, ISO)
 
 ## Safety-critical and mission-critical machines
 
@@ -29,6 +29,7 @@ Machines where every micro-event must be part of a forensic trail. Immutable tru
 - Cars and EVs (ADAS signals, battery cycles, braking telemetry)
 - Industrial robots (sensor fusion, error states, operator overrides)
 - Aviation systems (flight control inputs, airspeed changes)
+- Medical devices, rail signaling, power grid SCADA trails
 
 ## IoT and edge computing
 
@@ -39,6 +40,7 @@ Small devices speak in streams. The world changes in discrete steps, not overwri
 - Smart meters for water, electric, and gas
 - Agricultural sensors (soil moisture, rumen monitors, RFID readers)
 - Factory-floor devices tracking cycle counts and wear
+- Fleet telematics (location, driver behavior, maintenance alerts)
 
 ## Offline-first or intermittently connected systems
 
@@ -49,6 +51,7 @@ Connectivity is flaky, but truth must eventually sync. Peer-to-peer replication 
 - Farm devices recording events during the day and syncing overnight
 - Mobile apps that need durable local write-side storage
 - Disaster-response systems coordinating across degraded networks
+- Remote mining, maritime, and oilfield operations with sparse connectivity
 
 ## Distributed and replicated systems
 
@@ -57,8 +60,9 @@ Multiple nodes exchange truth safely, often across regions or tenants. EventDBX 
 - Peer-to-peer collaboration tools
 - Replicated ledgers for internal services
 - Multi-region microservices and sharded control planes
-- Multi-tenant SaaS domains
+- Multi-tenant SaaS domains with per-tenant branches
 - AI agent memory stores (MCP workflows, autonomous agents)
+- Edge → core fan-in for devices, vehicles, or field sites
 
 ## Systems that need versioned schemas
 
@@ -68,6 +72,7 @@ When your model evolves alongside the business. Schemas become part of the story
 - Data pipelines that require backward-compatible contract enforcement
 - Multi-team systems where coordinated migrations are painful
 - Regulated applications that need explicit schema-version trails
+- Public APIs and SDKs where contract drift must be prevented
 
 ## Observability, analytics, and replay scenarios
 
@@ -78,6 +83,8 @@ Business logic often depends on sequences, not snapshots. EventDBX lets you repl
 - Manufacturing yield analysis
 - Predictive maintenance
 - Timeline-based debugging and retroactive fixes
+- Model evaluation, regression testing, and reruns on new features or heuristics
+- Pricing, risk, and policy simulations where replay matters
 
 ## Immutable, tamper-evident logs
 
@@ -89,6 +96,7 @@ Cryptographic truth is a hard requirement. Noise Protocol handshakes plus Merkle
 - Provenance tracking (food, supply chain, art, documents)
 - Internal security logs
 - Data-integrity guarantees for AI agents and copilots
+- Chain-of-custody evidence and eDiscovery timelines
 
 ## Developer-focused workflows
 
@@ -99,6 +107,7 @@ Teams that value speed and iteration. Developers spend more time shipping and le
 - Prototyping new domain logic or feature spikes
 - Local-first development environments
 - CLIs and automation tools that need durable state without a full database
+- Feature flag, experiment, and config stores that require history and rollbacks
 
 ## Domain-driven design systems
 
@@ -109,6 +118,7 @@ Events are the primary business concepts, so aggregates map directly to ubiquito
 - Ticketing and incident systems
 - Project and task management tools
 - Identity systems (`user_registered`, `user_verified`, `user_updated`)
+- Billing, invoicing, and entitlements that depend on event trails
 
 ## AI memory and agent orchestration
 
@@ -119,6 +129,7 @@ Agents need stable memory more than fast SQL queries. EventDBX gives them a dura
 - Reproducible task sequences and battle-tested playbooks
 - Shared knowledge bases across cooperating agents
 - Immutable “thought trails” with verifiable cross-agent messaging
+- LLM evaluation harnesses and experiment logs with rollback/replay
 
 ## Niche but powerful engineering cases
 
@@ -130,7 +141,8 @@ Places where traditional databases feel too heavy or too mutable. If it can emit
 - Large-scale simulation logs
 - Scientific experiments (lab equipment event trails)
 - Geospatial event trails (GPS traces, route reconstruction)
+- Game telemetry, esports analytics, and virtual-world state trails
 
 ---
 
-EventDBX excel when change itself is the product. Pick the pattern that matches your reality, plug into the CLI/SDK stack, and treat every mutation as an asset instead of a liability.
+EventDBX excels when change itself is the product. Pick the pattern that matches your reality, plug into the CLI/SDK stack, and treat every mutation as an asset instead of a liability.

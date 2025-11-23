@@ -5,14 +5,14 @@ description: "Materialize aggregate state efficiently with deterministic snapsho
 
 Snapshots give you point-in-time state without replaying every event. EventDBX stores them alongside the event log and refreshes them automatically when needed.
 
-## When snapshots rebuild
+## When snapshots refresh
 
 - After a configurable number of events (`snapshot_stride`).
-- When an operator calls `dbx aggregate snapshot rebuild`.
+- When an operator calls `dbx aggregate snapshot <aggregate> <id>`.
 - When a plugin requests a payload slice that requires the latest state.
 
 ```bash
-dbx aggregate snapshot rebuild invoice inv-9931
+dbx aggregate snapshot invoice inv-9931
 dbx aggregate snapshot show invoice inv-9931 --format json
 ```
 
