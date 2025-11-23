@@ -71,6 +71,7 @@ Swap in the Python, Java, PHP, .NET, or Go SDKs described on the Client SDKs pag
 
 ## Next steps
 
+- **Schema setup**: use CLI schema commands to create and evolve schemas (e.g., `dbx schema create ...`, `dbx schema add ...`, `dbx schema remove ...`, `dbx schema field ...`, `dbx schema alter ...`), or edit the `schema.json` files under your shard folders if you prefer to define them manually; see `dbx schema --help` for the full command surface.
 - **Snapshots and verification**: `dbx aggregate snapshot <aggregate> <id>` materializes the latest state, and `dbx aggregate verify` recomputes Merkle roots when you need to prove integrity.
 - **Replication**: run `dbx watch standby` to stream changes to a standby node, or `dbx push/pull` for one-off syncs.
 - **Plugins**: configure HTTP or TCP plugins to fan events out to downstream services once your domain is populated.

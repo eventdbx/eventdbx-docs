@@ -1,0 +1,81 @@
+---
+title: "Security"
+description: "Keep EventDBX locked down with scoped tokens, encryption at rest and in transit, and tamper-evident storage."
+---
+
+EventDBX favors passwordless, token-based access and built-in encryption so you can secure the write path without bolt-ons. Use this page as the security playbook across domains.
+
+## Identity and authorization
+
+- Mint Ed25519-signed tokens per role and rotate them regularly. Tokens carry group/user claims and can cap time-to-live and write counts.
+- Keep domains isolated: switch with `dbx checkout <domain>` and mint domain-scoped tokens so experiments never touch production.
+- Revoke quickly when secrets leak.
+
+```bash
+dbx token bootstrap --stdout                         # first admin token
+dbx token generate --group svc-orders --user api \
+  --ttl 10m --limit 500 --keep-alive                 # scoped, short-lived
+dbx token list                                       # view jti + claims
+dbx token revoke --token <value>                     # revoke by token value
+```
+
+## Encryption at rest
+
+- Set a data-encryption key once per host: payloads, snapshots, and `tokens.json` encrypt transparently; metadata (aggregate ids, Merkle roots) stays readable for plugins and integrity checks.
+- Store DEKs in your secret manager; never bake them into images.
+
+```bash
+dbx config --dek "$(openssl rand -base64 32)"
+```
+
+## Encryption in transit
+
+- All control-socket traffic uses Noise handshakes by default. Keep the daemon on a private network; layer TLS/SSH/WireGuard only when policy demands it.
+- Plugins inherit the same transport protections when configured with remotes (`--remote <host[:port]> --token <token>` on `dbx checkout`).
+
+## Immutability and tamper evidence
+
+- Writes are append-only; there is no in-place update path.
+- Per-aggregate Merkle roots make tampering obvious. Verify regularly and export proofs when sharing data.
+
+```bash
+dbx aggregate verify person p-110 --json     # recompute Merkle root
+```
+
+If you need per-event proof paths, fetch them from the server API or a downstream verifier service that exposes Merkle branch exports.
+
+## Secure plugin posture
+
+- Scope payloads down: choose the smallest `--payload <mode>` that fits (`event-only` for webhooks, `state-only` for caches, `schema-only` for registries, `event-and-schema` for validators, `extensions-only` when you only need metadata extensions).
+- Treat plugin credentials like any other secret—rotate them, prefer short-lived tokens for outbound calls, and sign outbound requests when supported.
+- Log plugins are for audit trails; avoid shipping sensitive payload fields there unless they are encrypted or redacted downstream.
+
+Example selector and payload scoping:
+
+```jsonc
+// plugins.json (per domain)
+[
+  {
+    "enabled": true,
+    "emit_events": true,
+    "name": "customer_webhook",
+    "payload_mode": "event-only",
+    "config": {
+      "type": "http",
+      "endpoint": "https://webhook.example.com/ingest",
+      "headers": {},
+      "https": true
+    }
+  }
+]
+# CLI: dbx plugin config http --plugin customer_webhook --payload event-only
+# Re-run plugin config commands to rotate tokens or tighten payload scope; changes persist to plugins.json.
+```
+
+## Hardening checklist
+
+- Run with `--restrict strict` in production; use permissive/default only while schemas evolve.
+- Set a DEK via `dbx config --dek ...`; keep backups of the key in a vault.
+- Issue short-lived, least-privilege tokens per service and domain.
+- Keep control sockets off the public internet; require Noise/TLS tunnels across zones.
+- Verify Merkle roots (`dbx aggregate verify ...`) on a schedule and keep proofs with regulated exports.

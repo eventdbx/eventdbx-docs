@@ -3,47 +3,52 @@ title: "Flexibility"
 description: "Adapt EventDBX to each bounded context without rewriting aggregates."
 ---
 
-EventDBX is intentionally opinionated about append-only storage yet lenient everywhere else. Domains, schema modes, selectors, and plugins form building blocks you can rearrange without touching the core event log.
+EventDBX is intentionally opinionated about append-only storage yet lenient everywhere else. Domains, schema modes, and plugin payload modes form building blocks you can rearrange without touching the core event log.
 
 ## Carve up work with domains
 
 Use domains whenever a team, product surface, or environment needs its own truth:
 
 ```bash
-dbx domain create payments-prod --path /srv/dbx/payments
-dbx checkout payments-prod
-dbx status
+dbx checkout payments-prod --create   # create if missing, then activate
+dbx checkout payments-dev --create    # spin up an isolated dev domain
+dbx status                            # confirm active domain + config
 ```
 
 Each domain keeps its own RocksDB store, Merkle trees, replication offsets, and plugin queues. Teams can experiment safely by creating `*-dev` domains that reuse only the schemas they trust.
 
+### Switch domains with `dbx checkout`
+
+`dbx checkout` activates a domain (and can create or delete it) without touching other domains:
+
+- `dbx checkout <name> --create` to spin up a new domain for experiments, CQRS bounded contexts, or per-environment isolation.
+- `--delete [--force]` to remove a domain deliberately; use when retiring experiments.
+- `--remote <host[:port]> --token <token> [--remote-tenant <tenant>]` to bind a domain to a remote control socket, useful when your write node lives elsewhere.
+
+This keeps iteration friction low—you can hop between domains or point a domain at a remote daemon without rebuilding schemas or replaying history.
+
 ## Evolve schemas gradually
 
-Start in permissive mode to learn from production traffic, then tighten restrictions when the model stabilizes.
+Start in a permissive validation mode while schemas evolve, then restart the daemon with a stricter mode once shapes settle (e.g., `dbx start --restrict=strict`).
 
 ```bash
-dbx restrict set permissive   # allow payload drift
-dbx schema column add invoice amount --type decimal --required
-dbx restrict set strict       # lock in the evolved schema
+dbx schema create person
+dbx schema field person first_name --type text --required
+dbx schema activate person --version <hash>
 ```
 
 EventDBX never mutates historical payloads. Instead, new columns surface through snapshots and plugins once they appear often enough. Re-snapshotting an aggregate with `dbx aggregate snapshot <aggregate> <id>` lets you adopt the updated shape without replaying the full stream.
 
 ## Route only the slices you need
 
-Plugins subscribe to selectors so services receive exactly what they can handle. For example, a billing plugin might consume aggregate metadata while a reporting plugin wants full payloads:
+Plugins choose the minimal payload per domain when you run `dbx plugin config <type> … --payload <mode>`. Modes include `all` (default), `event-only`, `state-only`, `schema-only`, `event-and-schema`, and `extensions-only` (clears payload but keeps metadata/extensions). For process plugins, add `--emit-events=false` if you want the worker supervised without enqueuing jobs.
 
-```toml
-[plugin.billing]
-type = "http"
-selector = { domain = "payments", include_metadata = true, include_payload = false }
-
-[plugin.reporting]
-type = "capnp"
-selector = { domain = "payments", include_payload = true }
+```bash
+dbx plugin config http billing --endpoint https://billing.internal/hooks --payload state-only
+dbx plugin config capnp reporting --host reporting.internal --port 7777 --payload event-and-schema
 ```
 
-Selectors keep flexibility high because you can bolt on new read models without modifying the write path.
+Because payloads are set per plugin, you can bolt on new read models without modifying the write path or exposing data they do not need.
 
 ## Sample workflow
 

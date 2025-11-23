@@ -7,7 +7,7 @@ Snapshots give you point-in-time state without replaying every event. EventDBX s
 
 ## When snapshots refresh
 
-- After a configurable number of events (`snapshot_stride`).
+- After a configurable number of events (`snapshot_threshold`).
 - When an operator calls `dbx aggregate snapshot <aggregate> <id>`.
 - When a plugin requests a payload slice that requires the latest state.
 
@@ -37,18 +37,20 @@ Compression keeps them small, so retaining several generations is cheap. Use `db
 
 ## Tuning cadence
 
-- **High-churn aggregates** (carts, sessions): lower `snapshot_stride` to 5–10 events so plugins read fresh state quickly.
-- **Low-churn aggregates** (accounts, ledgers): keep stride high (100+) to minimize writes.
+- **High-churn aggregates** (carts, sessions): lower `snapshot_threshold` to 5–10 events so plugins read fresh state quickly.
+- **Low-churn aggregates** (accounts, ledgers): keep the threshold high (100+) to minimize writes.
 - **Large payloads**: consider enabling incremental snapshots so only changed fields are persisted.
 
 Configure per aggregate type:
 
 ```toml
 [aggregate.invoice]
-snapshot_stride = 25
+snapshot_threshold = 25
 [aggregate.cart]
-snapshot_stride = 8
+snapshot_threshold = 8
 ```
+
+Set a global default via `dbx config --snapshot-threshold <count>` and override per aggregate with `dbx schema create ... --snapshot-threshold <count>` or `dbx schema update ...`.
 
 ## Using snapshots downstream
 

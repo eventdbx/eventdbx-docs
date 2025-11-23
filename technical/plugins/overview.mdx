@@ -34,6 +34,18 @@ selector = {
 
 Use selectors to keep payloads small and avoid exposing sensitive fields unnecessarily.
 
+## Payload modes
+
+Each plugin instance can request just the slice it needs. When you run `dbx plugin config ...`, pass `--payload <mode>`:
+
+| Mode             | Includes                                      | Typical use case                  |
+| ---------------- | --------------------------------------------- | --------------------------------- |
+| `all`            | Event document, materialised state, and schema (default) | Rich projections or migrations    |
+| `event-only`     | Event document only                           | Webhooks, streams, audit relays   |
+| `state-only`     | Latest state map only                         | Cache warmers, read replicas      |
+| `schema-only`    | Aggregate schema only                         | Schema registries                 |
+| `event-and-schema` | Event + schema, no state                    | Validation services, codegen      |
+
 ## Retries and DLQ
 
 Plugins retry failed jobs automatically. Configuration example:

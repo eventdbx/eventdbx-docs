@@ -1,47 +1,70 @@
 ---
 title: "Extensibility"
-description: "Extend EventDBX with plugins, adapters, and schema evolutions."
+description: "Use extension metadata and payload modes to shape how EventDBX integrates with the rest of your stack."
 ---
 
-Extensibility comes from a narrow core surrounded by pluggable adapters. You can introduce new transports, validation rules, or automations without pausing the daemon.
+EventDBX keeps the write path small and verifiable, then lets you hang read models, pipelines, and policy engines off the side. Two core tools make that possible: a namespaced extension envelope attached to every event and payload modes that tailor what each plugin receives.
 
-## Plugin lifecycle hooks
+## Extension envelopes on events
 
-Plugins subscribe to the durable queue, dequeue events, and ack when work is done. A minimal HTTP plugin entry:
+Writes accept an optional `--metadata` JSON object. The server stores it separately as `extensions` so system metadata (Snowflake id, timestamps, issuer) stays distinct from your own hints.
 
-```toml
-[plugin.crm-sync]
-type = "http"
-endpoint = "https://crm.internal/events"
-selector = { domain = "sales", include_payload = true }
-retries = { max_attempts = 12, backoff = "exponential" }
+- Keys must be namespaced with an `@` prefix (for example `@trace`, `@policy-rule`).
+- The extension map must be a JSON object and is capped at 64 KiB.
+- The bag travels with the event everywhere: CLI/API reads, filters, exports, and every plugin payload mode that includes events or extensions.
+
+Example envelope delivered to plugins and event listings:
+
+```json
+{
+  "aggregate_type": "patient",
+  "aggregate_id": "p-001",
+  "event_type": "patient-updated",
+  "payload": { "status": "inactive" },
+  "extensions": {
+    "@trace": { "correlation_id": "rest-1234" },
+    "@policy": { "source": "rest-api" }
+  },
+  "metadata": {
+    "event_id": "1234567890123",
+    "created_at": "2025-02-03T12:34:56.123Z",
+    "issued_by": { "group": "admin", "user": "jane" }
+  },
+  "version": 5,
+  "hash": "<hash>",
+  "merkle_root": "<merkle_root>"
+}
 ```
 
-Custom transports extend the same interface: implement `Init`, `Handle(event)`, and `Shutdown` to participate in the queue lifecycle. Use the MCP server (see Technical section) to distribute secrets and monitor status centrally.
+## Writing and consuming extensions
 
-## Schema extensions
+- Attach namespaced hints as you append events:
 
-Need a custom column type or validation rule? Author it as a WASM module or drop a shared library into `plugins/validators`. EventDBX loads validators dynamically:
+  ```bash
+  dbx aggregate apply patient p-001 patient-updated \
+    --payload '{"status":"active"}' \
+    --metadata '{"@trace":{"correlation_id":"cli-22"},"@policy":{"role":"doctor"}}'
+  ```
 
-```bash
-dbx validator install uuidv7 --path ./validators/libuuidv7.so
-dbx schema column add session session_id --type uuidv7
-```
+- Filter event streams by extension data when debugging or replaying:
 
-Legacy aggregates keep their original columns; new events adopt the richer type automatically.
+  ```bash
+  dbx events --filter 'extensions.@trace.correlation_id = "cli-22"' --take 10
+  ```
 
-## Automation and tooling
+- Plugins see the same extension bag even when you hide payload/state; use it for correlation ids, audit markers, policy decisions, or routing keys.
 
-- **CLI wrappers**: script domain bootstrapping or replication checks in your preferred language; `dbx` emits JSON everywhere to make integration easy.
-- **SDKs**: use the TypeScript client or generate your own via OpenAPI; the RPC surface is intentionally small (aggregates, schemas, queue).
-- **Observability**: emit custom metrics from plugins, pipe audit logs into your APM, and correlate them with queue depth to determine whether to scale horizontally.
+## Plugin payload modes (including extensions-only)
 
-## Bridging existing systems
+Configure each plugin with the smallest payload it needs via `--payload`:
 
-EventDBX plays nicely with message buses, CDC pipelines, and data warehouses:
+| Mode               | Includes                                                      | Use when you need…                           |
+|--------------------|---------------------------------------------------------------|----------------------------------------------|
+| `all`              | Event, materialised state, schema                             | Rich projections or migrations               |
+| `event-only`       | Event document                                                | Webhooks, audit relays, simple streams       |
+| `state-only`       | Latest state map                                              | Cache warmers, read replicas                 |
+| `schema-only`      | Aggregate schema                                              | Schema registries, validators                |
+| `event-and-schema` | Event + schema, no state                                      | Validation services, codegen                 |
+| `extensions-only`  | Namespaced `extensions` map; payload/state nulled before send | Telemetry, policy gates, downstream fan-out without exposing payloads |
 
-- Mirror events to Kafka with the process plugin + `kafka-producer.sh`.
-- Keep Elasticsearch in sync using the HTTP plugin with bulk endpoints.
-- Drive ETL jobs by tailing the log plugin output and loading it into your warehouse every hour.
-
-Because plugins operate asynchronously, slow downstream systems never block writers. You can add or replace integrations as your architecture evolves without rewriting aggregates or touching historical data.
+`extensions-only` strips payload and state before enqueueing jobs or delivering directly to plugins, while keeping identifiers and the extension map intact. Pair it with lightweight HTTP/process plugins when you just need correlation ids, routing hints, or policy labels to reach external systems. Because plugins consume events asynchronously, slow downstream systems never block writers; swap payload modes or add connectors as your architecture evolves.

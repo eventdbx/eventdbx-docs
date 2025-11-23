@@ -7,18 +7,26 @@ Integrity comes from a combination of deterministic storage, cryptographic proof
 
 ## Per-aggregate Merkle trees
 
-Every aggregate maintains a Merkle tree built from event payload + metadata hashes. The root hash is persisted with each snapshot, giving you a single value to compare across nodes.
+Every aggregate maintains a Merkle tree built from event payload + metadata hashes. The current root is persisted alongside snapshots, giving you a single value to compare across nodes.
 
 ```bash
-dbx aggregate merkle person p-110
-# => hash: 92e2b1... level: 7 events: 32
+dbx aggregate verify person p-110 --json
+# {
+#   "aggregate_type": "person",
+#   "aggregate_id": "p-110",
+#   "merkle_root": "92e2b1..."
+# }
 ```
 
-Compare two domains (for example, primary vs standby) by exporting the hash list:
+Compare two domains by checking each one’s active checkout:
 
 ```bash
-dbx aggregate merkle person p-110 --json > primary.json
-dbx aggregate merkle person p-110 --json --domain standby > standby.json
+dbx checkout primary
+dbx aggregate verify person p-110 --json > primary.json
+
+dbx checkout standby
+dbx aggregate verify person p-110 --json > standby.json
+
 diff primary.json standby.json
 ```
 
@@ -26,35 +34,32 @@ Any divergence signals tampering or replication lag.
 
 ## Validation modes
 
-- **Permissive**: Events always append, but warnings highlight schema mismatches. Best for prototypes.
-- **Strict**: Events that fail validation are rejected with actionable error messages. Enable this before launch.
+- **off**: Allows events without a declared schema (still enforces basic constraints like snake_case names and payload size).
+- **default**: Validates events against schemas when they exist but does not require a schema to be present.
+- **strict**: Requires a schema for the aggregate before the first event can be appended; validation still runs when schemas exist.
 
-Switch modes per domain:
+Set the mode when starting the daemon (or via `EVENTDB_RESTRICT`):
 
 ```bash
-dbx restrict set strict --domain payments-prod
-dbx restrict set permissive --domain payments-dev
+dbx start --restrict strict     # enforce schemas before writes
+dbx start --restrict default    # allow undeclared aggregates, validate when schemas exist
+dbx start --restrict off        # most permissive
 ```
 
-Strict mode pairs with CI pipelines that run `dbx schema lint` to catch regressions before deployment.
+Changes take effect on restart; there is no per-aggregate override.
 
 ## Checksums during replication
 
-`dbx push` and `dbx pull` exchange Merkle roots and highest offsets before transferring data. The receiving node validates snapshots as they arrive:
+`dbx push` and `dbx pull` refuse to overwrite divergent history and verify Merkle roots during transfer:
 
-```
-▶ dbx push standby --since 2024-05-01
-  sync aggregates.....done
-  verify hashes.......passed
-  updated standby root 92e2b1...
-```
+- **Push**: Fails if the remote has more events for an aggregate. When the remote has some history, the local Merkle root at the remote’s version must match before any new events are appended.
+- **Pull**: Fails if the local copy is ahead. Missing events are fetched, the expected Merkle root is recomputed locally, and the pull aborts if it doesn’t match the remote’s root.
 
-If verification fails, the command aborts and leaves the standby untouched. Operators can then rerun with `--repair` to re-stream affected aggregates only.
+If verification fails, the command aborts and leaves the target untouched; there is no `--repair` flag.
 
 ## Inspecting and repairing drift
 
-1. Run `dbx integrity scan` to list aggregates whose Merkle roots no longer match snapshots.
-2. For each aggregate, replay events into a fresh snapshot using `dbx aggregate repair <type> <id>`.
-3. Re-run the scan to verify repairs and mark the incident in your audit log.
+- To spot drift, script against `dbx aggregate list --json` and `dbx aggregate verify <type> <id> --json` on each node, then diff Merkle roots.
+- When `dbx push`/`dbx pull` reports a divergence, pick the authoritative domain, create a fresh domain on the out-of-date node (`dbx checkout recovered --create`), and re-sync from the trusted copy.
 
 Because EventDBX stores the entire history, you never lose the data needed to rebuild a consistent state.
