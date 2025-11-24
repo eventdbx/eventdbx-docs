@@ -96,6 +96,25 @@
   "footer": {
     "socials": {
       "github": "https://github.com/eventdbx/eventdbx"
-    }
+    },
+    "links": [
+      {
+        "header": "Company",
+        "items": [
+          {
+            "label": "Become a Sponsor",
+            "href": "https://github.com/sponsors/eventdbx"
+          },
+          {
+            "label": "Privacy Policy",
+            "href": "https://eventdbx.com/privacy-policy"
+          },
+          {
+            "label": "Terms of Service",
+            "href": "https://eventdbx.com/terms-of-service"
+          }
+        ]
+      }
+    ]
   }
 }
