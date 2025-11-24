@@ -52,6 +52,12 @@ Example envelope delivered to plugins and event listings:
   dbx events --filter 'extensions.@trace.correlation_id = "cli-22"' --take 10
   ```
 
+- Replay stored events through a plugin to validate how payload modes affect deliveries:
+
+  ```bash
+  dbx plugin replay search patient p-001 --payload-mode extensions-only
+  ```
+
 - Plugins see the same extension bag even when you hide payload/state; use it for correlation ids, audit markers, policy decisions, or routing keys.
 
 ## Plugin payload modes (including extensions-only)

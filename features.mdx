@@ -9,7 +9,7 @@ EventDBX focuses on the write side of CQRS so you can capture every mutation as 
 
 - **Flexible JSON payloads** – events accept arbitrary JSON; scalars normalize into strings for consistent state tracking, while nested objects remain queryable through filters like `payload.status = "active"`.
 - **Immutable data structure** – once persisted, events cannot be edited or deleted. You can archive aggregates or shift them into long-term storage, but history stays intact for audits and compliance.
-- **Event sourcing and replay** – replay any aggregate with `dbx aggregate replay` to rebuild state at a point in time. Updates are expressed as events rather than in-place writes.
+- **Event sourcing and replay** – replay stored events through plugins with `dbx plugin replay <plugin> <aggregate>` to rebuild read models or inspect historical state. Updates are expressed as events rather than in-place writes.
 - **Merkle tree integration** – every aggregate maintains a Merkle tree of its events so `dbx aggregate verify` can detect tampering by recomputing the root hash.
 - **Built-in audit trails** – administrators can issue scoped tokens for auditors, granting read-only access to selected aggregates and their events.
 - **Extensible read models** – plugins consume the job queue and can request only the slices they need (event payload, materialized state, schema, or combinations). This keeps the write path isolated from read-model concerns.
@@ -67,7 +67,6 @@ Most commands boil down to a handful of RocksDB reads/writes. Use the table belo
 | `aggregate select` | O(log N + P_selected)    | Same state read as `get`; dot-path traversal is in-memory. |
 | `aggregate apply`  | O(P)                     | Payload validation + merge + append in one batch write.    |
 | `aggregate patch`  | O(log N + P + patch_ops) | Reads current state, applies JSON Patch, appends delta.    |
-| `aggregate replay` | O(Eₐ)                    | Linear in the streamed events for that aggregate.          |
 | `aggregate verify` | O(Eₐ)                    | Recomputes the Merkle root across events.                  |
 
 Staged events live in `.eventdbx/staged_events.json`. Queue them with `aggregate apply --stage`, preview with `aggregate list --stage`, and flush the entire batch via `aggregate commit` for all-or-nothing persistence.

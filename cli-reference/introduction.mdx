@@ -59,9 +59,8 @@ Schemas are stored on disk and enforced whenever restriction mode is `default` o
 - `dbx aggregate create --aggregate <type> --aggregate-id <id> --event <name> [--field KEY=VALUE...] [--payload <json>] [--metadata <json>] [--note <text>] [--token <value>] [--json]`
 - `dbx aggregate apply --aggregate <type> --aggregate-id <id> --event <name> --field KEY=VALUE... [--payload <json>] [--stage] [--token <value>] [--note <text>]`
 - `dbx aggregate patch --aggregate <type> --aggregate-id <id> --event <name> --patch <json> [--stage] [--token <value>] [--metadata <json>] [--note <text>]`
-- `dbx aggregate list [--skip <n>] [--take <n>] [--stage]`
+- `dbx aggregate list [--aggregate <type>] [--cursor <token>] [--take <n>] [--stage] [--filter <expr>] [--sort <field[:order],...>] [--include-archived|--archived-only]`
 - `dbx aggregate get --aggregate <type> --aggregate-id <id> [--version <u64>] [--include-events]`
-- `dbx aggregate replay --aggregate <type> --aggregate-id <id> [--skip <n>] [--take <n>]`
 - `dbx aggregate verify --aggregate <type> --aggregate-id <id>`
 - `dbx aggregate snapshot --aggregate <type> --aggregate-id <id> [--comment <text>]`
 - `dbx aggregate archive|restore --aggregate <type> --aggregate-id <id> [--comment <text>]`
@@ -72,19 +71,26 @@ Complexity hints live on the [features page](/features#aggregate-operation-costs
 
 ## Events
 
-- `dbx events [--aggregate <type>] [--aggregate-id <id>] [--skip <n>] [--take <n>] [--filter <expr>] [--sort <field[:order],...>] [--json] [--include-archived|--archived-only]`
+- `dbx events [--aggregate <type>] [--aggregate-id <id>] [--cursor <token>] [--take <n>] [--filter <expr>] [--sort <field[:order],...>] [--json] [--include-archived|--archived-only]`
 - `dbx events --event <snowflake_id> [--json]` – omit `--event` if the first positional argument is a Snowflake id.
 - `dbx aggregate export [<type>] [--all] --output <path> [--format csv|json] [--zip] [--pretty]`
 
 `--filter` accepts SQL-like expressions (for example, `payload.status = "open" AND metadata.note LIKE "retry%"`). Prefix fields with `payload.`, `metadata.`, or `extensions.`.
 
+## Snapshots
+
+- `dbx snapshots list [--aggregate <type>] [--aggregate-id <id>] [--version <n>] [--json]` – enumerate snapshots with optional aggregate scoping and version filters.
+- `dbx snapshots create <aggregate> <aggregate_id> [--comment <text>]` – materialise a new snapshot of the current aggregate state.
+- `dbx snapshots get <snapshot_id> [--json]` – fetch a specific snapshot by Snowflake id.
+
 ## Plugins and queues
 
 - `dbx plugin install|enable|disable|remove`
-- `dbx plugin config tcp|http|log|process|capnp` – choose payload slices via `--payload <all|event-only|state-only|schema-only|event-and-schema>`.
-- `dbx plugin test`
+- `dbx plugin start|stop|status <name>` – manage supervised process plugin workers.
+- `dbx plugin config tcp|http|log|process|capnp` – choose payload slices via `--payload <all|event-only|state-only|schema-only|event-and-schema|extensions-only>`.
+- `dbx plugin test [<name>…]`
 - `dbx plugin list`
-- `dbx plugin replay <plugin> <aggregate> [<aggregate_id>]`
+- `dbx plugin replay <plugin> <aggregate> [<aggregate_id>] [--payload-mode <all|event-only|state-only|schema-only|event-and-schema|extensions-only>]`
 - `dbx queue`, `dbx queue clear`, `dbx queue retry [--event-id <job-id>]`
 
 Queues guarantee delivery with exponential backoff. Clearing dead entries prompts for confirmation to avoid accidental loss.
