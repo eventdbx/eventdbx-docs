@@ -7,21 +7,23 @@ Events are immutable facts. Each carries a type, payload, metadata, and monotoni
 
 ## Designing event types
 
-- Use verbs in past tense (`invoice_issued`, `invoice_paid`).
+- Use verbs in past tense (`person_registered`, `person_updated`).
 - Keep payloads focused: one event should represent a single business fact.
 - Version types explicitly (`invoice_paid.v2`) if the meaning changes drastically; otherwise, evolve schemas through optional fields.
 
 ## Schema evolution
 
-Add optional fields first, then flip them to required once you are confident they always appear:
+Add optional fields first, then tighten them once you are confident they always appear. Use schemas to encode those rules:
 
 ```bash
-dbx schema column add invoice_paid payment_method --type string --optional
-# gather data, then
-dbx schema column update invoice_paid payment_method --required
+# declare allowed events and snapshot cadence
+dbx schema create person --events person_registered,person_updated --snapshot-threshold 50
+# add or constrain columns later
+dbx schema field person first_name --type text --required
+dbx schema field person status --type text
 ```
 
-For breaking changes, mint a new event type and deprecate the old one via `dbx schema deprecate`.
+For breaking changes, mint a new event type and deprecate the old one in code; schemas can lock a list of allowed events to enforce the transition.
 
 ## Metadata for traceability
 
@@ -44,10 +46,11 @@ Plugins can filter on metadata without parsing payloads, and auditors can answer
 Use events to rebuild read models or repair downstream systems:
 
 ```bash
-dbx aggregate events invoice inv-991 --since 2024-05-01 --pipe ./scripts/replay-to-kafka.sh
+dbx events --aggregate person --aggregate-id p-991 --sort version:asc --take 100 --json
+dbx plugin replay search person p-991 --payload-mode event-only
 ```
 
-When replaying into plugins, set `@replay=true` so receivers can differentiate new writes from backfills.
+When replaying into plugins, set an `@replay` extension so receivers can differentiate new writes from backfills.
 
 ## Idempotency
 

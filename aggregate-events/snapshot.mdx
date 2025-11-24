@@ -3,61 +3,40 @@ title: "Snapshots"
 description: "Materialize aggregate state efficiently with deterministic snapshots."
 ---
 
-Snapshots give you point-in-time state without replaying every event. EventDBX stores them alongside the event log and refreshes them automatically when needed.
+Snapshots give you point-in-time state without replaying every event. EventDBX stores them alongside the event log and refreshes them automatically when schema thresholds call for it.
 
 ## When snapshots refresh
 
 - After a configurable number of events (`snapshot_threshold`).
-- When an operator calls `dbx aggregate snapshot <aggregate> <id>`.
-- When a plugin requests a payload slice that requires the latest state.
+- When an operator calls `dbx snapshots create <aggregate> <id>`.
+- When schemas request it via `snapshot_threshold` (auto-snapshots fire after appends hit that count).
 
 ```bash
-dbx aggregate snapshot invoice inv-9931
-dbx aggregate snapshot show invoice inv-9931 --format json
+dbx snapshots list --aggregate person --aggregate-id p-001 --json
+dbx snapshots create person p-001 --comment "pre-migration checkpoint"
+dbx snapshots get 1539956313031424 --json
 ```
 
-Snapshots include payload, metadata, Merkle root, and the index of the last applied event.
+Snapshots include payload, metadata (including Snowflake id), Merkle root, and the index of the last applied event. Use `dbx aggregate verify` when you need a fresh Merkle root without creating a snapshot.
 
 ## Storage layout
 
-Snapshots live in the same RocksDB column family as aggregates. Each entry stores:
-
-```
-{
-  "aggregate": "invoice",
-  "id": "inv-9931",
-  "version": 64,
-  "payload": {...},
-  "merkle_root": "a7f4...",
-  "updated_at": "2024-05-04T11:12:33Z"
-}
-```
-
-Compression keeps them small, so retaining several generations is cheap. Use `dbx snapshot prune` to drop old versions if you need to reclaim disk.
+Snapshots live alongside aggregate state in RocksDB and include the aggregate id, version, payload, Merkle root, timestamps, and optional comments. Compression keeps them small, so retaining several generations is usually cheap.
 
 ## Tuning cadence
 
 - **High-churn aggregates** (carts, sessions): lower `snapshot_threshold` to 5–10 events so plugins read fresh state quickly.
-- **Low-churn aggregates** (accounts, ledgers): keep the threshold high (100+) to minimize writes.
-- **Large payloads**: consider enabling incremental snapshots so only changed fields are persisted.
+- **Low-churn aggregates** (accounts, ledgers): keep the threshold higher (100+) to minimise writes.
 
-Configure per aggregate type:
+Configure per aggregate type in the schema (persisted in `schemas.json`):
 
-```toml
-[aggregate.invoice]
-snapshot_threshold = 25
-[aggregate.cart]
-snapshot_threshold = 8
+```bash
+dbx schema create person --events person_registered,person_updated --snapshot-threshold 25
+dbx schema alter person --snapshot-threshold 10   # tighten later if churn rises
 ```
 
-Set a global default via `dbx config --snapshot-threshold <count>` and override per aggregate with `dbx schema create ... --snapshot-threshold <count>` or `dbx schema update ...`.
+Set a global default via `dbx config --snapshot-threshold <count>` and override per aggregate with `dbx schema create ... --snapshot-threshold <count>` or `dbx schema alter ...`.
 
 ## Using snapshots downstream
 
-Plugins can request snapshots instead of replaying events:
-
-```toml
-selector = { include_snapshot = true, include_events = false }
-```
-
-Use this for read models that want current state (search indexes, caches) without caring about the entire history. If a downstream system falls behind, simply replay snapshots plus events from the last acknowledged offset.
+Plugins can request snapshots instead of replaying events when they only need current state (`payload_mode state-only`). Use this for read models that want current state (search indexes, caches) without caring about the entire history. If a downstream system falls behind, replay snapshots plus events from the last acknowledged offset.

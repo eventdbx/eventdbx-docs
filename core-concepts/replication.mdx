@@ -3,20 +3,67 @@ title: "Replication"
 description: "Design standby replicas, promote nodes safely, and automate push/pull/watch workflows."
 ---
 
-EventDBX replication favors a primary-plus-standby topology: one node owns writes, while others stay warm and ready to take over. Operators use `push`, `pull`, and `watch` commands to keep Merkle trees aligned across environments.
+EventDBX replication is flexible: you can run a primary/standby pattern or a multi-writer mesh. `push`, `pull`, and `watch` keep Merkle trees aligned across nodes; divergences stop the sync so you never rewrite history silently.
+Replication is asynchronous, not a distributed transaction. Expect lag that depends on your `watch` interval (`--interval <secs>`, default 300) or how often you run `push`/`pull`.
 
-## Approach a standby & non-distributive database
+## Pattern 1: Primary → standbys (one writer)
 
-- Stick to a single writer to avoid conflicting histories; treat every other node as a deterministic replica.
-- Promote a standby only after comparing Merkle hashes and verifying the last replicated offset.
-- Capture automation runbooks for token rotation, firewall changes, and client failover when promotion happens.
+- Pick a single writer (primary) per domain; configure standbys as pull-only or accept pushes from the primary.
+- Use `dbx watch <remote> --mode push` on the primary to stream changes out, or `--mode pull` on standbys to ingest from the primary. Either way, only one side writes.
+- Before promoting a standby, compare Merkle roots and last offsets; cut writes to the old primary, then flip clients.
+- Example (hospital hub-and-spoke): the regional data center writes; each facility runs `dbx watch hub --mode pull` to stay current. If the hub fails, promote one facility after verifying hashes.
+- Attach remotes per domain with `dbx checkout <name> --create --remote <host[:port]> --token <value> [--remote-tenant <id>]` so subsequent `push`/`pull`/`watch` calls reuse stored endpoints and credentials.
 
-[Deep dive → Standby strategy](../replication/standby-non-distributive)
+## Pattern 2: Mesh (multi-writer)
 
-## Watch / push / pull
+- Allow writes in multiple regions, then synchronise with `dbx watch --mode bidirectional` between peers. Use fine-grained scopes (`--aggregate`, `--id`) to limit blast radius if needed.
+- Conflicts are avoided by design: EventDBX aborts on diverging histories. If two writers append conflicting events to the same aggregate, resolve by choosing the authoritative timeline and reseeding the other node.
+- Example (hospital mesh): facilities in different regions write local events (admissions, vitals), and peers run `dbx watch <peer> --mode bidirectional --aggregate patient` so patient aggregates converge. If a conflict surfaces, pick the authoritative facility and re-sync from it.
 
-- Use `dbx watch` to stream changes continuously when latency matters.
-- Schedule `dbx push`/`dbx pull` windows for bulk transfers or air-gapped environments.
-- Instrument retries, bandwidth, and drift alerts so operators catch failures quickly.
+## Replication command reference
 
-[Deep dive → Watch / push / pull](../replication/watch-push-pull)
+### watch
+
+Streams changes continuously with automatic retries and backoff.
+
+```bash
+dbx watch standby-a --mode push --background
+dbx watch primary --mode pull --aggregate patient
+dbx watch peer-1 --mode bidirectional --aggregate patient --id p-001 --run-once
+```
+
+- Modes: `push` (send to remote), `pull` (ingest from remote), `bidirectional` (sync both ways).
+- Scopes: `--aggregate <type>`, `--id <aggregate_id>` to target specific streams.
+- Flags: `--background` to daemonise, `--run-once` for a single pass, `--skip-if-active` to avoid overlap, `--concurrency <threads>` to tune parallelism.
+
+### push
+
+One-off transfer from the current domain to a remote.
+
+```bash
+dbx push standby-b
+dbx push standby-b --aggregate patient --id p-001 --concurrency 8
+```
+
+- Scopes: `--aggregate <type>`, `--id <aggregate_id>`.
+- Throughput: `--concurrency <threads>` (defaults to CPU count).
+
+### pull
+
+One-off ingest from a remote into the current domain.
+
+```bash
+dbx pull primary
+dbx pull primary --aggregate patient --id p-001 --concurrency 8
+```
+
+- Scopes: `--aggregate <type>`, `--id <aggregate_id>`.
+- Throughput: `--concurrency <threads>`.
+
+### Monitoring and recovery
+
+- Commands exit non-zero on failure; wrap `push`/`pull` in retries or let `watch` run continuously.
+- Monitor `/metrics` (Prometheus) for replication counters and lag.
+- On failure: identify the last successful aggregate/version, rerun scoped `push|pull` or restart `watch` (it resumes from its cursor). If a divergence is detected, pick the authoritative side, reseed with `push|pull`, then restart `watch`.
+-
+Always push schemas first (`dbx push schema <remote>`) before syncing events so validation stays in lockstep.

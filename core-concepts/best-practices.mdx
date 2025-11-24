@@ -1,0 +1,38 @@
+---
+title: "Best practices"
+description: "Field-tested tips for modeling, securing, and operating EventDBX with fast writes and reliable fan-out."
+---
+
+EventDBX stays fast when writes never wait on downstream work. Use these practices to keep that promise while giving read models, auditors, and operators the data they need.
+
+## Model and domains
+
+- Create one domain per bounded context or tenant; switch with `dbx checkout <domain> --create` and persist remote settings there so `push`/`pull`/`watch` reuse stored credentials.
+- Keep aggregate shapes small and purpose-built; avoid “god” aggregates that mix unrelated workflows.
+- Prefer task-oriented events (what happened) over CRUD deltas; payloads should read like facts you can replay later.
+
+## Schemas and restriction
+
+- Start with `restrict=default` to allow undeclared aggregates while validating declared ones; move to `restrict=strict` once schemas stabilise.
+- Capture allowed fields per event and use column rules (required, length, range, regex, format) to encode intent. Snapshot thresholds belong in the schema so they travel with the aggregate.
+- Reject ambiguous names up front: keep aggregate and event names snake_case and avoid overloaded fields that mean different things in different events.
+
+## Snapshots and verification
+
+- Use schema-driven snapshot thresholds to refresh high-churn aggregates frequently; call `dbx snapshots create` for point-in-time checkpoints before migrations or audits.
+- Pair exports with Merkle proofs: `dbx aggregate verify` (or snapshot metadata) gives auditors a hash to detect tampering without replaying traffic.
+- Prune old snapshots only when storage pressure demands it; they are cheap, deterministic rebuild points for downstream systems.
+
+## Plugins, payload modes, and replay
+
+- Configure plugins with the smallest payload mode they need (`event-only`, `state-only`, `event-and-schema`, or `extensions-only` for metadata-only fan-out) to minimise blast radius and cost.
+- Let the queue absorb backpressure; do not couple plugin latency to writes. Monitor retries and prune done jobs on a schedule.
+- Use `dbx plugin replay <plugin> <aggregate> [<id>] --payload-mode <mode>` to reseed read models or validate new selectors without re-enabling writes. Keep `emit_events=true` only for plugins that should consume the queue.
+
+## Security and operations
+
+- Set a DEK once (`dbx config --dek <base64>`) so payloads, snapshots, and tokens encrypt at rest; rotate Ed25519 keys and tokens regularly with scoped TTLs and write limits.
+- Isolate experiments with domains and domain-scoped tokens; avoid reusing production credentials on non-prod remotes.
+- Before replication, push schemas first, then data; abort on divergence and recover by cloning from the authoritative domain instead of forcing mismatched histories.
+- Treat the staging file (`aggregate apply --stage`) as a batch tool, not a long-term buffer; commit or clear it to avoid surprises.
+- Issue fine-grained auth tokens with `--action` and `--resource` (or env defaults) so each token only touches the aggregates and verbs it needs. Pair short TTLs with scoped write limits for automation; use `dbx token refresh` instead of reissuing secrets.

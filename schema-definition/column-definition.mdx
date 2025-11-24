@@ -7,42 +7,43 @@ Columns describe the shape of each event payload. EventDBX treats them as contra
 
 ## Supported types
 
-- `string`, `text`, `enum`
-- `integer`, `decimal`, `float`
-- `boolean`, `timestamp`
-- `json`, `bytes`
-
-Install custom types (UUIDv7, currency) via validators if needed.
+- `integer`
+- `float`
+- `decimal(precision,scale)`
+- `boolean`
+- `text`
+- `timestamp`
+- `date`
+- `json`
+- `binary`
+- `object`
 
 ## Adding columns
 
 ```bash
-dbx schema column add invoice_issued amount --type decimal --required --description "Total invoice amount in minor units"
-dbx schema column add invoice_issued currency --type enum --values USD EUR GBP --default USD
+dbx schema create person --events person_registered,person_updated --snapshot-threshold 50
+dbx schema field person first_name --type text --required
+dbx schema field person age --type integer --range-min 0
+dbx schema field person status --type text --format snake_case
 ```
 
 Columns apply to future events only. Historical payloads remain untouched but will fail validation if replayed without the required fields.
 
 ## Documenting ownership
 
-Use annotations so teammates know who maintains each column:
+Annotate events with notes so teammates know intent or risk:
 
 ```bash
-dbx schema column annotate invoice_issued amount --owner billing-team --since 2024-04-01
+dbx schema annotate person person_updated --note "Includes PII; keep payload mode minimal for plugins"
 ```
-
-These annotations surface inside generated docs and CLI descriptions.
 
 ## Deprecating fields
 
-When a column is no longer needed:
+When a column is no longer needed, clear its type/rules and stop allowing it for events:
 
 ```bash
-dbx schema column deprecate invoice_issued legacy_id --sunset 2024-09-01 --note "Replaced by invoice_number"
+dbx schema field person legacy_id --clear-type --clear-rules
+dbx schema alter person person_updated --remove legacy_id
 ```
 
-Deprecation warns producers while keeping historical events valid. After the sunset date, remove the column entirely if no payloads reference it.
-
-## Referencing columns in downstream systems
-
-Because schemas live in version control (`docs.json` + MDX), you can generate OpenAPI or GraphQL types automatically. Run `dbx schema export --format openapi` to share definitions with other teams.
+Deprecation warns producers while keeping historical events valid. Downstream systems should stop sending or expecting the field once removed from the allow-list.

@@ -3,44 +3,50 @@ title: "Watch / Push / Pull"
 description: "Explain replication commands and automation patterns."
 ---
 
-Three commands cover replication needs: `watch` for streaming, `push` for proactive sync, and `pull` for recovery. Mix them to match your latency and workflow goals.
+Three commands cover replication needs: `watch` for continuous sync, `push` for one-way transfers, and `pull` for ingesting from a remote. Mix them to match your latency and workflow goals.
 
 ## watch
 
-Streams changes continuously to a remote endpoint.
+Streams changes continuously with automatic retries and backoff.
 
 ```bash
-dbx watch standby-a --token $STANDBY_TOKEN
+dbx watch standby-a --mode push --background
+dbx watch primary --mode pull --aggregate patient
+dbx watch peer-1 --mode bidirectional --aggregate patient --id p-001 --run-once
 ```
 
-- Maintains a cursor so restarts resume where they left off.
-- Ideal for near-real-time DR and read-only replicas.
-- Emits metrics (`events_transferred`, `lag_seconds`) for dashboards.
+- Modes: `push` (send to remote), `pull` (ingest from remote), `bidirectional` (sync both ways).
+- Scopes: `--aggregate <type>` and `--id <aggregate_id>` to target specific streams.
+- Flags: `--background` to daemonise, `--run-once` for single pass, `--skip-if-active` to avoid overlapping runs, `--concurrency <threads>` to tune parallelism.
 
 ## push
 
-Initiates a one-off transfer from the active domain to a target. Common in controlled environments where the primary reaches out to secondaries.
+Initiates a one-off transfer from the active domain to a remote.
 
 ```bash
-dbx push standby-b --since 2024-05-01T00:00:00Z
+dbx push standby-b
+dbx push standby-b --aggregate patient --id p-001
 ```
 
-Use `--aggregates subset.txt` to limit the transfer to critical data during incidents.
+- Scopes: `--aggregate <type>` and `--id <aggregate_id>` to narrow the transfer.
+- Throughput: `--concurrency <threads>` to tune parallelism (defaults to CPU count).
 
 ## pull
 
-Runs from the standby to fetch updates, perfect for air-gapped or firewalled environments.
+Runs from the standby to fetch updates from a remote.
 
 ```bash
-dbx pull primary --until now --verify
+dbx pull primary
+dbx pull primary --aggregate patient --id p-001
 ```
 
-Pair with cron or workflow engines (GitHub Actions, Jenkins) to automate nightly syncs.
+- Scopes: `--aggregate <type>` and `--id <aggregate_id>` to narrow the transfer.
+- Throughput: `--concurrency <threads>` to tune parallelism (defaults to CPU count).
 
 ## Monitoring and retries
 
-- Commands exit non-zero if verification fails; wrap them in scripts that retry with exponential backoff.
-- Log replication metrics to your observability stack. Example Prometheus scrape from `/metrics`:
+- Commands exit non-zero on failure; wrap them in scripts that retry with backoff or let `watch` run continuously.
+- Monitor replication metrics from `/metrics` (Prometheus):
 
 ```
 eventdbx_replication_events_total{target="standby-a"} 123456
@@ -49,8 +55,8 @@ eventdbx_replication_lag_seconds{target="standby-a"} 12
 
 ## Failure recovery
 
-1. Capture the failing offset from logs.
-2. Rerun `dbx push --since <offset>` or `dbx watch --resume-from <offset>`.
-3. If corruption is detected, rerun with `--repair` to rebuild affected aggregates only.
+1. Identify the last successful aggregate/version (from logs or metrics).
+2. Rerun `dbx push|pull` scoped to the affected aggregate(s), or restart `dbx watch` (it resumes from its cursor).
+3. If a divergence is detected, choose the authoritative side, reseed the other with `push|pull`, and restart `watch`.
 
-Combining these commands lets you tailor replication for low-latency mirrors, offline backups, and everything in between.
+Combining these commands lets you tailor replication for low-latency mirrors, standby recovery, or mesh syncs without risking silent history rewrites.

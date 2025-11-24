@@ -3,27 +3,27 @@ title: "Philosophy"
 description: "Understand the principles that shape EventDBX—flexibility, integrity, security, auditability, and extensibility."
 ---
 
-EventDBX is fundamentally built around these ideas: append-only truth, reproducible state, and integrations that are specifically designed to never block writes. This page serves as your high-level compass and philosophical guide to understanding the system's design principles, and when you feel ready to begin shipping and implementing solutions, you can jump into the linked deep dives that provide comprehensive technical details.
+EventDBX is fundamentally built around these ideas: append-only truth, reproducible state, and integrations that never block writes. This page is the high-level compass; jump into the deep dives when you need field-by-field details or CLI examples.
 
 ## Flexibility
 
-- Start in `default` mode so teams can append JSON payloads without schema friction, then switch to `strict` once data shapes stabilize.
-- Use `dbx checkout` to spin up isolated domains for experiments, bounded contexts (CQRS-style), or separate environments so changes never touch production or other domains.
-- Feed each read model only the slices it needs by tailoring plugin payload selectors.
+- Start in `default` mode so teams can append JSON payloads without schema friction, then switch to `strict` once data shapes stabilise.
+- Use `dbx checkout` to spin up isolated domains (or delete them) and persist remote settings for replication. This keeps experiments, bounded contexts, and environments walled off.
+- Feed each read model only the slices it needs by tailoring plugin payload selectors (including the `extensions-only` mode for metadata-only fan-out) and overriding them ad hoc with `dbx plugin replay --payload-mode …`.
 
 [Deep dive → Flexibility](./flexibility)
 
 ## Data integrity
 
-- Per-aggregate Merkle trees serve as cryptographic proofs for state, payload, and metadata.
-- Schemas use verbose column definitions with built-in types, formats, and validation rules (required, length, range, regex) so intent stays explicit and unambiguous.
-- Toggle `dbx restrict` between permissive and strict modes to match your environment without rewriting history.
+- Per-aggregate Merkle trees and deterministic snapshots keep proofs cheap to recompute and compare across nodes.
+- Schemas use explicit column definitions with built-in types, formats, and validation rules (required, length, range, regex) so intent stays unambiguous.
+- Toggle `dbx restrict` between permissive and strict modes to match your environment without rewriting history. Auto-snapshots fire at configurable thresholds; create point-in-time snapshots on demand when you need a checkpoint.
 
 [Deep dive → Data integrity](./data-integrity)
 
 ## Security
 
-- Encrypt payloads, snapshots, and tokens at rest with the DEK, and enforce Noise handshakes in transit so credentials never cross plaintext.
+- Encrypt payloads, snapshots, and tokens at rest with the DEK; enforce Noise handshakes in transit so credentials never cross plaintext.
 - Append-only storage plus Merkle roots make the log immutable and tamper-evident.
 - Generate Ed25519 tokens per role with fine-grained scopes (TTL, write limits), rotate them regularly, and keep authentication passwordless by design.
 
@@ -32,15 +32,15 @@ EventDBX is fundamentally built around these ideas: append-only truth, reproduci
 ## Auditability
 
 - Every aggregate keeps an append-only history plus deterministic snapshots for quick reads.
-- Export proofs to auditors or partner teams without replaying production traffic.
-- Stream or replay events to backtrack and retrace every change, then use CLI helpers to sign, archive, and verify aggregate timelines.
+- Export proofs to auditors or partner teams without replaying production traffic; include Merkle roots with exported snapshots.
+- Stream or plugin-replay events with precise payload modes to retrace every change, then use CLI helpers to archive, restore, and verify aggregate timelines.
 
 [Deep dive → Auditability](./auditability)
 
 ## Extensibility
 
-- Build plugins that emit just the payload slices downstream systems expect.
-- Extend schema rules, column types, or transports without stopping the daemon.
-- Bridge EventDBX into existing buses, CDC pipelines, or serverless workers.
+- Build plugins that emit just the payload slices downstream systems expect, and let the queue absorb backpressure so writes stay fast.
+- Extend schema rules, column types, transports, or plugin payload modes without stopping the daemon.
+- Bridge EventDBX into existing buses, CDC pipelines, serverless workers, or ad hoc replays—plugins operate asynchronously and can be toggled per domain.
 
 [Deep dive → Extensibility](./extensibility)

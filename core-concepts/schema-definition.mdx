@@ -3,28 +3,51 @@ title: "Schema Definition"
 description: "Design event and snapshot schemas that balance iteration speed with strict guarantees."
 ---
 
-Schema enforcement in EventDBX is opt-in and gradual: you start flexible, codify columns as you learn, then bake validation rules once the model hardens. Use this page as the entry point for schema planning.
+Schema enforcement in EventDBX is opt-in and gradual. Start flexible, codify columns as you learn, then tighten validation once the model hardens. Schemas live in `schemas.json` (per domain/tenant), drive validation for every write, and include snapshot thresholds so materialisation stays predictable.
 
-## Column definition
+## What schemas control
 
-- Choose column types (string, number, enum, JSON) that match how downstream systems consume data.
-- Use `dbx schema column add` to evolve structures without rewriting historical payloads.
-- Embed docs and ownership notes next to each column so teams know when it is safe to reuse them.
+- Field allow-lists per event (which fields each event may set).
+- Column types and rules (required/optional, ranges, regexes, formats, nested properties).
+- Snapshot cadence per aggregate (`snapshot_threshold`) plus field visibility (`schema hide`).
+- Versioning and history via publish/activate so changes stay auditable.
+
+## Define fields and events
+
+- Supported column types: `integer`, `float`, `decimal(precision,scale)`, `boolean`, `text`, `timestamp`, `date`, `json`, `binary`, `object`.
+- Allow fields per event: `dbx schema alter <aggregate> <event> --add <field,...>` (or `--remove/--set/--clear`).
+- Shape fields: `dbx schema field <aggregate> <field> --type <type> [--required|--not-required] [--format ...] [--length-min ... --length-max ...] [--range-min ... --range-max ...] [--regex ...] [--contains ...] [--properties <json>]`.
+- Snapshot cadence belongs in the schema: `dbx schema create ... --snapshot-threshold <count>` and `dbx schema alter ... --snapshot-threshold <count>` override the global default.
 
 [Deep dive → Column definition](../schema-definition/column-definition)
 
-## Rules
+## Validation and formats
 
-- Attach validation rules globally or per column to enforce ranges, regexes, or custom predicates.
-- Test new rules in permissive mode before promoting them to strict enforcement.
-- Track how rule changes impact historical data and plan remediation steps up front.
+- Inline rules via `dbx schema field`: required/optional, contains/does_not_contain, regex (repeatable), length, numeric/date range, nested `properties` for objects.
+- Apply semantic formats with `--format <email|url|credit_card|country_code|iso_8601|wgs_84|camel_case|snake_case|kebab_case|pascal_case|upper_case_snake_case>`; drop them with `--clear-format`.
+- Hide sensitive fields from aggregate detail responses: `dbx schema hide --aggregate <type> --field <name>`.
+- Test in `restrict=default`, then enforce in `restrict=strict` once confident.
 
-[Deep dive → Rules](../schema-definition/rules)
+[Deep dive → Rules](../schema-definition/rules) · [Deep dive → Field formats](../schema-definition/format)
 
-## Format
+## Versioning workflow
 
-- Pick JSON when you need inspection simplicity; switch to Cap'n Proto or other binaries for throughput.
-- Document schema serialization choices so downstream teams can regenerate bindings.
-- Plan migrations carefully: run dual writes, validate consumers, then deprecate the old format.
+Schemas are versioned artifacts. Edit via the CLI or by touching `schemas.json`, then:
 
-[Deep dive → Format](../schema-definition/format)
+1) `dbx schema publish` – snapshot the current schema (per tenant/domain).  
+2) `dbx schema activate --version <id>` – make a published version active.  
+3) `dbx schema reload` – force the daemon to pick up the active version if needed.
+
+Inspection tools:
+
+- `dbx schema history` – list published versions with who/when/why.
+- `dbx schema show --version <id>` – view a specific version.
+- `dbx schema diff --from <id> --to <id>` – compare versions (patch/unified/split).
+- `dbx schema rollback --version <id>` – restore a prior version as active.
+
+Validation helpers:
+
+- `dbx schema validate <aggregate> --event <name> --payload <json>` – test payloads against the active schema.
+- `dbx schema list` – inspect current aggregates and snapshot thresholds.
+
+Even when editing `schemas.json` directly, publish/activate to keep history auditable and nodes consistent.

@@ -1,39 +1,39 @@
 ---
-title: "Format"
-description: "Describe schema serialization formats and their trade-offs."
+title: "Field formats"
+description: "Use built-in format validators to constrain schema fields."
 ---
 
-Event payloads default to JSON but can be re-encoded per plugin. Choosing the right format impacts latency, observability, and tooling.
+Format validators add semantic checks on top of a column type. EventDBX ships a set of built-ins you can apply via `dbx schema field ... --format <name>`.
 
-## JSON
+## Supported formats
 
-- Human readable and easy to debug.
-- Works well with the CLI, log plugin, and most downstream stacks.
-- Larger on disk; serialization costs show up when throughput exceeds ~50k events/min.
+- `email`
+- `url`
+- `credit_card`
+- `country_code`
+- `iso_8601`
+- `wgs_84` (latitude/longitude pair)
+- `camel_case`
+- `snake_case`
+- `kebab_case`
+- `pascal_case`
+- `upper_case_snake_case`
 
-Use JSON for prototypes, admin tools, or integrations that need transparency.
+## Applying formats
 
-## Cap'n Proto (CaPnP)
-
-- Binary format with schema evolution baked in.
-- Pair with the CaPnP plugin to emit compact frames.
-- Requires tooling support on the consumer side but delivers excellent throughput.
-
-Generate schemas automatically:
+Add or update a field with a format:
 
 ```bash
-dbx schema export --format capnp --aggregate invoice > invoice.capnp
+dbx schema field person email --type text --format email --required
+dbx schema field person address --type text --format snake_case
 ```
 
-## Hybrid strategies
+Clear a format when it no longer applies:
 
-- Emit JSON to logs for observability, Cap'n Proto to real-time consumers.
-- Keep snapshots in JSON for ease of inspection but stream events in binary to search pipelines.
+```bash
+dbx schema field person email --clear-format
+```
 
-## Migration playbook
-
-1. Introduce optional fields needed by the new format.
-2. Run dual plugins (JSON + binary) temporarily and compare metrics.
-3. Point consumers to the new stream, then decommission the old plugin.
+Formats combine with other rules (required/optional, length, range, regex, contains) to tighten validation as schemas mature.
 
 Document the rationale and compatibility guarantees in your runbook so future teams understand how to decode historical payloads.

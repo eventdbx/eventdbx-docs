@@ -27,6 +27,7 @@
             "group": "Core Concepts",
             "pages": [
               "core-concepts/philosophy",
+              "core-concepts/best-practices",
               "core-concepts/domain-context",
               "core-concepts/aggregate-events",
               "core-concepts/schema-definition",

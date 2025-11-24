@@ -13,19 +13,25 @@ Aggregates are the unit of consistency inside EventDBX. They own their events, s
 
 ## Lifecycle
 
-Create aggregates implicitly by applying the first event:
+Create aggregates explicitly with an initial event:
 
 ```bash
-dbx aggregate apply invoice inv-991 invoice_issued --payload '{...}'
+dbx aggregate create person p-991 person_registered --payload '{"first_name":"jane","last_name":"doe"}'
 ```
 
-Check the current state:
+Append new facts as they occur:
 
 ```bash
-dbx aggregate show invoice inv-991 --include-events 5
+dbx aggregate apply person p-991 person_updated --payload '{"status":"active"}'
 ```
 
-Delete operations are rare; prefer terminal events (`invoice_voided`) that mark state without removing history. If you must retire an aggregate, call `dbx aggregate tombstone <type> <id>` so downstream systems know to purge caches.
+Check current state (with optional history):
+
+```bash
+dbx aggregate get person p-991 --include-events
+```
+
+Delete operations are rare; prefer terminal events (`invoice_voided`) that mark state without removing history. If you must retire an aggregate, archive it (`dbx aggregate archive <type> <id>`) or remove only when it has no events (`dbx aggregate remove` requires version 0).
 
 ## Metadata conventions
 
@@ -38,7 +44,7 @@ Delete operations are rare; prefer terminal events (`invoice_voided`) that mark 
 }
 ```
 
-Reserve the `@` prefix for system metadata. Everything else belongs to your business domain. Consistent metadata enables search, audit, and replication filters.
+Reserve the `@` prefix for extension metadata. Everything else belongs to your business domain. Consistent metadata enables search, audit, and replication filters. Use namespaced keys (`@trace`, `@tenant`) to keep user hints distinct from system metadata.
 
 ## Anti-patterns to avoid
 

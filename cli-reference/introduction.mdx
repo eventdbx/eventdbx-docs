@@ -23,7 +23,7 @@ The `dbx` CLI is the single entry point for starting the daemon, managing schema
 
 ## Domains
 
-- `dbx checkout -d <domain>` – switch the active domain. Creates storage roots under `<data_dir>/domains/<domain>`.
+- `dbx checkout <domain> [--create|--delete] [--force] [--remote <host[:port]>] [--port <u16>] [--token <value>] [--remote-tenant <id>]` – activate a domain (creating or deleting it with the flags) and optionally store remote replication settings in `remote.json` for later `push`/`pull`/`watch` commands.
 - `dbx merge --from <domain> [--into <domain>] [--overwrite-schemas]` – copy events + schemas from one domain into another. Existing aggregates abort unless explicitly overwritten.
 
 ## Tokens
