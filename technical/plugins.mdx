@@ -3,52 +3,41 @@ title: "Plugins"
 description: "Understand the plugin surface area before diving into each transport-specific guide."
 ---
 
-Plugins dequeue committed events, transform the payload slices they care about, and push them to external systems. Start here to pick a transport, then follow the linked sections for configuration and operational details.
+Plugins dequeue committed events, transform the payload slices they care about, and push them to external systems. Definitions are stored at the system data root (for example `~/.eventdbx/plugins.json`); configure with `dbx plugin config <type>` instead of editing TOML. Start here to pick a transport, then follow the linked sections for configuration and operational details.
 
 ## Overview
 
-- Learn how selectors, batching, retries, and acknowledgements work together.
-- Decide whether to run plugins alongside the daemon or remotely with MPC coordination.
-- Track metrics and logs for each plugin so you can remediate failures quickly.
+- Learn how payload modes and the queue work together (`emit_events`, retries, payload trimming).
+- Decide whether to run lightweight emitters (TCP/HTTP/Capnp/Log) or supervised binaries (process plugins).
+- Track plugin logs/queue state so you can remediate failures quickly (`dbx queue`, `dbx plugin test`).
 
 [Deep dive → Plugin overview](./plugins/overview)
 
 ## HTTP
 
-- POST payload slices to any HTTPS endpoint with configurable headers and auth.
-- Use batching plus exponential backoff to avoid overwhelming downstream services.
-- Export metrics such as delivery latency and DLQ counts.
+- POST plugin envelopes to HTTP(S) endpoints with configurable headers.
+- Pair with payload modes (`event-only`, `state-only`, etc.) to avoid over-sharing data.
+- Retries are handled by the EventDBX plugin queue (`plugin_max_attempts`).
 
 [Deep dive → HTTP plugin](./plugins/http)
 
 ## TCP
 
-- Stream events over raw sockets when latency matters most.
-- Wrap the channel in the built-in Noise_XX handshake, WireGuard, or SSH tunnels if the network is untrusted.
-- Tune buffer sizes, batch counts, and concurrency to match consumer throughput.
+- Write JSON envelopes over TCP (one connection per delivery) for simple, low-latency consumers.
+- Keep consumers fast; the plugin queue retries on failure.
 
 [Deep dive → TCP plugin](./plugins/tcp)
 
-## CaPnP
-
-- Serialize payloads with Cap'n Proto for compact delivery and fast decoding.
-- Generate schemas from EventDBX columns, then share them with downstream consumers.
-- Plan for schema evolution by versioning messages and keeping decoders backwards compatible.
-
-[Deep dive → CaPnP plugin](./plugins/capnp)
-
 ## Process
 
-- Spawn local executables per event for ultimate flexibility (and responsibility).
-- Template payloads into env vars or temporary files, then enforce CPU/memory limits.
-- Monitor exit codes and timeouts to keep the queue healthy.
+- Run supervised binaries; EventDBX installs, starts/stops, and retries when they fail.
+- Choose minimal payload modes to reduce queue pressure; use `dbx plugin start|stop|status`.
 
 [Deep dive → Process plugin](./plugins/process)
 
 ## Log
 
-- Emit NDJSON to local or remote log collectors for SIEM/Audit ingestion.
-- Rotate, compress, and ship logs with your preferred agent (Fluent Bit, Vector, etc.).
-- Prefer the log plugin when you need human-readable trails or offline archives.
+- Emit envelopes to the EventDBX log target for quick debugging or lightweight audit trails.
+- Forward logs with your existing log pipeline (Splunk, Datadog, etc.).
 
 [Deep dive → Log plugin](./plugins/log)

@@ -1,55 +1,23 @@
 ---
 title: "Log Plugin"
-description: "Append events to structured logs for SIEMs and audit warehouses."
+description: "Emit plugin envelopes to the EventDBX log output."
 ---
 
-The log plugin writes NDJSON entries to disk or stdout so existing log collectors can ingest EventDBX events.
+The log plugin writes plugin envelopes (event/state/schema) to the EventDBX log output. It’s useful for quick debugging or lightweight audit trails without configuring external transports. Configuration is stored at the system data root (for example `~/.eventdbx/plugins.json`), and publish targets can be specified per write if you only want selected events to reach the log sink.
 
 ## Configuration
 
-```toml
-[plugin.audit-log]
-type = "log"
-path = "/var/log/eventdbx/audit.ndjson"
-rotate = { size_mb = 512, files = 10, compress = true }
-selector = { include_payload = true, include_snapshot = false, metadata = { "@sensitivity" = "audit" } }
+Configure via CLI (definitions are stored in `~/.eventdbx/plugins.json`; no TOML editing needed):
+
+```bash
+dbx plugin config log --name audit-log --level info --template "agg={aggregate} id={id} event={event}" --payload event-only
 ```
 
-Set `path = "-"` to stream to stdout and let your supervisor capture it.
-
-## Log format
-
-Each line includes context for correlation:
-
-```json
-{
-  "ts": "2024-05-07T12:00:11.123Z",
-  "domain": "payments-prod",
-  "aggregate": "invoice",
-  "id": "inv-991",
-  "event": { "type": "invoice_paid", "version": 64 },
-  "metadata": { "@actor": "svc-invoice", "@correlation": "req-8821" },
-  "hash": "92e2b1..."
-}
-```
-
-Toggle payload and snapshot inclusion to fit your compliance model.
-
-## Shipping logs
-
-- Use Fluent Bit, Vector, or Logstash to tail the file and forward to your SIEM (Splunk, Datadog, Elastic).
-- Include `hash` and `version` fields so analysts can line up logs with aggregate proofs.
-
-## Rotation & retention
-
-- Rotate files before they exceed your collector’s limits.
-- Compress older logs and push them to object storage for long-term retention.
-- Mirror rotation settings with your system log policy so they integrate cleanly.
+`template` controls event formatting; `{aggregate}`, `{id}`, and `{event}` placeholders are replaced. If state or schema are included via payload mode, they are logged as JSON.
 
 ## When to use
 
-- Regulatory reporting that requires human-readable trails.
-- Ad-hoc debugging in lower environments.
-- Feeding data warehouses where ingestion jobs already expect NDJSON.
+- Local debugging without extra infrastructure.
+- Lightweight audit trails where log collectors (Splunk/Datadog/etc.) already ingest application logs.
 
-The log plugin trades delivery guarantees for simplicity, so pair it with another transport (HTTP/TCP) when you need exactly-once guarantees.
+Logs emit on the `eventdbx.plugin.log` target; forward them with your existing log pipeline. For stronger delivery guarantees, pair with HTTP/TCP/Capnp/process plugins.

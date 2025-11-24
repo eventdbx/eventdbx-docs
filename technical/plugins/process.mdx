@@ -1,55 +1,27 @@
 ---
 title: "Process Plugin"
-description: "Spawn local processes per event for extreme customization."
+description: "Run managed binaries that consume EventDBX plugin envelopes."
 ---
 
-The process plugin launches an executable for each event. It is powerful—anything you can script, you can run—but requires discipline to stay safe and performant.
+The process plugin supervises a long-running binary and feeds it plugin envelopes from the queue. EventDBX handles installs, starts/stops, and retries; your worker handles the business logic. Configuration is stored at the system data root (for example `~/.eventdbx/plugins.json`).
 
 ## Configuration
 
-```toml
-[plugin.runbook]
-type = "process"
-command = "/opt/eventdbx/hooks/runbook.sh"
-args = ["{aggregate}", "{id}", "{event.type}"]
-env = {
-  EVENT_PAYLOAD = "{payload.json}",
-  EVENT_METADATA = "{metadata.json}"
-}
-selector = { domain = "ops", include_payload = true }
-timeout_ms = 5000
-```
-
-Placeholders insert event data into arguments or environment variables.
-
-## Use cases
-
-- Triggering legacy scripts that expect CLI input.
-- Writing to systems without native plugins (custom appliances, mainframes).
-- Running smoke tests whenever certain aggregates change.
-
-## Safety recommendations
-
-- Run the plugin under a dedicated user with tight permissions.
-- Enable resource limits: `cpu_quota`, `memory_limit_mb`, `max_concurrency`.
-- Capture stdout/stderr and ship them to a log aggregator for debugging.
-
-## Error handling
-
-- Exit code `0`: success (ACK).
-- Non-zero exit or timeout: the job is retried according to `retries`. Include structured error messages so on-call engineers know what happened.
-
 ```bash
-echo '{"error":"pagerduty API timeout","retry_after":30}' >&2
-exit 2
+dbx plugin config process --name search --plugin dbx_search --version 1.0.0 --arg "--port=9100" --env SEARCH_URL=http://search:9200 --payload event-only
+dbx plugin start search --foreground   # or daemonise without --foreground
+dbx plugin status search
+dbx plugin stop search
 ```
 
-## Observability
+## Runtime behaviour
 
-- `plugin_process_concurrency`
-- `plugin_process_failures_total`
-- `plugin_process_duration_ms`
+- EventDBX supervises the worker; crashes trigger restarts.
+- Plugin envelopes (event/state/schema per payload mode) are delivered over the managed channel defined by the process plugin SDK.
+- Status files live under the domain data dir; `dbx plugin status` prints runtime state.
 
-Alert when failures spike—often a sign of downstream outages or bad code in the hook.
+## Tips
 
-Use the process plugin sparingly, but it is invaluable when you need to integrate EventDBX with systems that lack modern APIs.
+- Keep handlers idempotent; retries occur when workers fail or return errors.
+- Choose minimal payload modes (`event-only`, `extensions-only`) when possible to reduce queue pressure.
+- Log errors to stderr so EventDBX surfaces them in plugin logs; use `dbx plugin test <name>` to send a sample envelope during development.

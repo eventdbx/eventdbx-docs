@@ -49,16 +49,7 @@
             "pages": [
               "technical/captain-protocol",
               "technical/noise-protocol",
-              "technical/mcp-server",
               "technical/plugins"
-            ]
-          },
-          {
-            "group": "Extensions",
-            "pages": [
-              "technical/integration/restful",
-              "technical/integration/graphql",
-              "technical/integration/customs"
             ]
           },
           {

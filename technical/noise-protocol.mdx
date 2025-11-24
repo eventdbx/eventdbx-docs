@@ -1,55 +1,46 @@
 ---
 title: "Noise Protocol"
-description: "Understand how EventDBX uses the Noise framework for encrypted transport between nodes and plugins."
+description: "Understand how EventDBX uses Noise for encrypted, token-derived sessions across control, replication, and plugin channels."
 ---
 
-Noise is a flexible cryptographic framework for building custom handshakes. EventDBX uses a `Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s` pattern whenever sensitive channels require mutual authentication without relying on TLS.
+Noise is a flexible cryptographic framework for building custom handshakes. EventDBX uses a token-derived `Noise_NNpsk0_25519_ChaChaPoly_SHA256` pattern for control, replication, and plugin Cap’n Proto channels instead of TLS.
 
 ## Why Noise?
 
 - **Small footprint** – fits into sidecar binaries and embedded agents that cannot afford a full TLS stack.
-- **PSK support** – lets operators rotate pre-shared keys per plugin or replication target.
-- **Deterministic configuration** – Noise handshakes are defined by concise patterns, making audits straightforward.
+- **Token-derived PSK** – hashes the bearer token into a PSK so access control and transport security share the same credential.
+- **Deterministic configuration** – concise patterns make audits straightforward and minimise configuration drift.
 
 ## Handshake flow
 
-1. Both peers agree on a pre-shared key (`psk_id`). MCP distributes these secrets to authorized agents.
-2. The initiator sends an `e`phemeral key, encrypted with the PSK.
-3. The responder verifies the PSK, returns its own ephemeral key, and proves identity with a static key signed by the MCP CA.
-4. Both sides derive symmetric session keys for payload and header encryption.
+1. The initiator derives a PSK by hashing the bearer token; no static keys are exchanged out of band.
+2. The initiator sends an ephemeral key encrypted with the PSK (Noise `e` message).
+3. The responder verifies the PSK, responds with its ephemeral key, and both sides derive symmetric session keys.
+4. Session keys protect all subsequent frames (control RPCs, replication data, plugin envelopes).
 
 Pseudo-code:
 
 ```text
--> e
-<- e, ee, s, es, psk
--> s, se, psk
+-> e (psk)
+<- e, ee (psk)
 ```
 
-The session keys roll automatically every N messages (configurable, default 1 024) to minimize key reuse.
+EventDBX enforces frame size limits and restarts sessions on reconnect. Tokens rotate independently of the Noise profile: change a token, and the PSK changes automatically.
 
 ## Configuration
 
-Enable Noise on replication or plugin channels by referencing a shared profile:
+Noise is on by default for control, replication, and Capnp plugin sockets; no extra TLS is required. The effective protocol string is fixed in the binary:
 
-```toml
-[noise.default]
-pattern = "Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s"
-psk = "secret://noise/default"
-key_rotation_messages = 1024
-
-[replication.standby-wan]
-transport = "tcp+noise"
-noise_profile = "default"
-endpoint = "standby.example.com:7443"
+```
+Noise_NNpsk0_25519_ChaChaPoly_SHA256
 ```
 
-Secrets live in your vault or MCP server (`secret://` URIs). Rotate PSKs with `mcp secret rotate noise/default`.
+Remote endpoints and tokens are set per domain via `dbx checkout --remote <host[:port]> --token <value> [--remote-tenant <id>]`. Tokens are the only secret you need to rotate.
 
 ## Operational guidance
 
-- Monitor `noise_handshake_failures_total`; spikes usually indicate mismatched PSKs or stale agent certificates.
-- Log handshake fingerprints only in debug mode—never expose raw keys.
-- For zero-trust networks, layer Noise with WireGuard, IPSec, or hardware VPNs if regulators demand multiple independent controls.
+- Monitor `noise_handshake_failures_total`; spikes usually indicate bad or expired tokens.
+- Log handshake fingerprints only in debug mode—never expose tokens or derived PSKs.
+- For zero-trust requirements, you can still layer WireGuard/IPSec, but the built-in Noise handshake already authenticates with the same token you use for authorization.
 
-Noise is the default transport security layer for EventDBX traffic. Reach for additional tunnels only when compliance or defense-in-depth policies call for a second encryption boundary.
+Noise is the default transport security layer for EventDBX traffic (control, replication, Capnp plugin). Reach for additional tunnels only when compliance or defense-in-depth policies call for a second encryption boundary.

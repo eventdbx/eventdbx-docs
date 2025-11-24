@@ -6,7 +6,7 @@ description: "Design standby replicas, promote nodes safely, and automate push/p
 EventDBX replication is flexible: you can run a primary/standby pattern or a multi-writer mesh. `push`, `pull`, and `watch` keep Merkle trees aligned across nodes; divergences stop the sync so you never rewrite history silently.
 Replication is asynchronous, not a distributed transaction. Expect lag that depends on your `watch` interval (`--interval <secs>`, default 300) or how often you run `push`/`pull`.
 
-## Pattern 1: Primary → standbys (one writer)
+## Pattern 1: Standby (one writer)
 
 - Pick a single writer (primary) per domain; configure standbys as pull-only or accept pushes from the primary.
 - Use `dbx watch <remote> --mode push` on the primary to stream changes out, or `--mode pull` on standbys to ingest from the primary. Either way, only one side writes.
@@ -65,5 +65,4 @@ dbx pull primary --aggregate patient --id p-001 --concurrency 8
 - Commands exit non-zero on failure; wrap `push`/`pull` in retries or let `watch` run continuously.
 - Monitor `/metrics` (Prometheus) for replication counters and lag.
 - On failure: identify the last successful aggregate/version, rerun scoped `push|pull` or restart `watch` (it resumes from its cursor). If a divergence is detected, pick the authoritative side, reseed with `push|pull`, then restart `watch`.
--
-Always push schemas first (`dbx push schema <remote>`) before syncing events so validation stays in lockstep.
+- Always push schemas first (`dbx push schema <remote>`) before syncing events so validation stays in lockstep.

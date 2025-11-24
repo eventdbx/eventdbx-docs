@@ -45,7 +45,6 @@ Plugins choose the minimal payload per domain when you run `dbx plugin config <t
 
 ```bash
 dbx plugin config http billing --endpoint https://billing.internal/hooks --payload state-only
-dbx plugin config capnp reporting --host reporting.internal --port 7777 --payload event-and-schema
 ```
 
 Because payloads are set per plugin, you can bolt on new read models without modifying the write path or exposing data they do not need.
