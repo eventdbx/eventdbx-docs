@@ -5,6 +5,25 @@ description: "Understand the principles that shape EventDBX—flexibility, integ
 
 EventDBX is fundamentally built around these ideas: append-only truth, reproducible state, and integrations that never block writes. This page is the high-level compass; jump into the deep dives when you need field-by-field details or CLI examples.
 
+```mermaid
+flowchart TD
+    classDef pillar fill:#0f172a,stroke:#0f172a,color:#fff
+    classDef concept fill:#e5e7eb,stroke:#0f172a,color:#0f172a
+
+    Truth[Append-only truth] --- State[Reproducible state]
+    State --- NonBlock[Integrations never block writes]
+    NonBlock --- Truth
+
+    Flexibility([Flexibility]) --- NonBlock
+    Extensibility([Extensibility]) --- NonBlock
+    Integrity([Integrity]) --- State
+    Auditability([Auditability]) --- State
+    Security([Security]) --- Truth
+
+    class Truth,State,NonBlock pillar
+    class Flexibility,Extensibility,Integrity,Auditability,Security concept
+```
+
 ## Flexibility
 
 - Start in `default` mode so teams can append JSON payloads without schema friction, then switch to `strict` once data shapes stabilise.

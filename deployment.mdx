@@ -21,7 +21,7 @@ docker run \
 
 - The image publishes to Docker Hub as `thachp/eventdbx`, so `docker pull` always grabs the latest signed release you can test locally on macOS, Linux, or WSL without extra installers.
 - Mount a persistent volume so Merkle trees, schemas, and queued jobs survive restarts.
-- Port `7070` exposes the HTTP API; `6363` is the control socket the CLI and plugins hit.
+- Port `7070` exposes the HTTP API and `/metrics` endpoint for monitoring; `6363` is the Noise-secured control + replication socket the CLI, client SDK, `watch`, and peers use—apps typically talk via the SDK on `6363`.
 - Pass `--env EVENTDBX_RESTRICT=strict` or update `config.toml` inside the volume to enforce schema validation globally.
 
 <Tip>
@@ -39,6 +39,29 @@ When you are ready for production, reuse the same Docker Hub image on a virtual 
 - **AWS:** Provision an EBS volume (gp3 or io2), attach it to the EC2 instance, mount it (such as `/data/eventdbx`), and pass that mount into Docker.
 
 In every cloud, ensure the VM’s firewall allows the same `7070`/`6363` ports and that the attached volume is marked to persist independently of the VM lifecycle so you never lose aggregate history if the machine reboots or is replaced.
+
+## Cloud reference diagram
+
+```mermaid
+flowchart
+    subgraph Clients
+      Users[Clients / Services]
+    end
+
+    Users --> App[App / Service using Client SDK]
+    App -->|Noise| Daemon[EventDBX daemon<br/>Docker on VM]
+    CLI[CLI / Admin] -->|Tunnel| Daemon
+    Daemon -->|append/query| Storage[Block storage<br/>/var/lib/eventdbx]
+    Daemon -->|/metrics| Metrics[Prometheus / Grafana]
+    Daemon -->|plugin queue| Plugins[HTTP/TCP/Process plugins]
+    Plugins --> Dest[Downstream systems]
+    Daemon -.->|push/pull| Peer[Remote EventDBX]
+
+    classDef node fill:#e5e7eb,stroke:#0f172a,color:#0f172a
+    classDef infra fill:#0f172a,stroke:#0f172a,color:#fff
+    class Daemon infra
+    class Users,App,CLI,Storage,Metrics,Plugins,Dest,Peer node
+```
 
 ## Security defaults
 

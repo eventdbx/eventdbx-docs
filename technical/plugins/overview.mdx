@@ -7,6 +7,31 @@ Plugins turn EventDBX into a hub: the write path stays lean while plugins fan ev
 
 ## How it works
 
+```mermaid
+flowchart LR
+
+  A[Event Commit] --> B[EventDBX<br/>append to event log]
+
+  B -->|for each enabled plugin| C[Enqueue job - based on payload_mode & emit_events]
+
+  C --> D[Attempt Delivery - short-lived worker]
+
+  D -->|success| E[Plugin Receives Event]
+
+  D -->|failure| F[Retry Queue<br/>backoff until plugin_max_attempts]
+
+  F -->|retry| D
+
+  F -->|exceeds max attempts| G[Marked as Dead Letter - optional]
+
+  %% Styles
+  style B fill:#0d3b66,stroke:#0d3b66,color:#fff
+  style C fill:#f5f5f5,stroke:#ccc
+  style D fill:#f5f5f5,stroke:#ccc
+  style F fill:#ffe4e4,stroke:#ff9999
+  style G fill:#ffcccc,stroke:#ff6666
+```
+
 1. Events commit.
 2. EventDBX enqueues a job per enabled plugin (respecting its payload mode and `emit_events` flag).
 3. A short-lived delivery is attempted; failures stay in the queue and retry with backoff until `plugin_max_attempts`.
@@ -23,6 +48,7 @@ dbx aggregate apply orders order-1 order_created \
 ```
 
 Each `--publish` entry is `PLUGIN[:MODE[:PRIORITY]]`:
+
 - `PLUGIN` – configured plugin name (must be enabled).
 - `MODE` (optional) – overrides payload shape for this write (`all`, `event-only`, `state-only`, `schema-only`, `event-and-schema`, `extensions-only`); defaults to the plugin’s configured mode.
 - `PRIORITY` (optional) – `low|normal|high` for queue ordering; defaults to `normal`.

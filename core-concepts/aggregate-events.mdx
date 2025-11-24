@@ -11,6 +11,19 @@ Every state change flows through three artifacts: events, the aggregates they ap
 - Aggregates group related events, enforce identifiers and schemas, and expose the current state derived from the full event stream.
 - Snapshots cache that derived state at specific versions so reads and plugins stay fast without replaying the entire history.
 - Replays rebuild snapshots from events; snapshots prove what state existed at a version; aggregates tie both to a consistent identity.
+- Derived aggregate state can also serve reads/plugins directly when you don't need a cached snapshot.
+
+```mermaid
+flowchart
+  Write[Write/API call] --> Event[Events <br/> immutable facts]
+  Event -->|append| Aggregate[Aggregate stream <br/> versioned timeline]
+  Aggregate -->|replay| State[Derived state]
+  State -->|serve| Reads[Reads / Plugins]
+  State -->|persist| Snapshot[Snapshots <br/> versioned cache]
+  Snapshot -->|serve| Reads
+  Aggregate -->|Merkle root| Proof[Integrity proofs]
+  Event -.->|replay| Snapshot
+```
 
 ## Snapshots
 
