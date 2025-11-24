@@ -26,6 +26,70 @@ EventDBX follows the CQRS first principle: isolate the write path (capture + val
 2. **Plugins out** – every committed event flows into a durable job queue. TCP/HTTP/log/process emitters decide which payload slices they care about, while queue backoff keeps delivery reliable.
 3. **Domains & replication** – `dbx checkout` creates isolated storage roots per bounded context, and `dbx push/pull/watch` mirror those roots across environments with concurrency controls.
 
+## Where EventDBX fits
+
+EventDBX lives on the write side: only trusted services send commands, and plugins keep read models fresh. End users never touch EventDBX directly—they hit the downstream systems that plugins maintain.
+
+```mermaid
+flowchart TB
+  %% Write-side box
+  subgraph WRITE_SIDE[Immutable Write-Side]
+    B[EventDBX write-side]
+  end
+
+  %% Read-side + external systems
+  subgraph READ_PIPELINE[Read-Side & External Systems]
+    C[Plugin Queue]
+    D[Plugins & Connectors]
+
+    subgraph INTERNAL_READS[Internal Read Models]
+      E[Read Models<br/>search · analytics · ml]
+    end
+
+    subgraph EXTERNAL_SYSTEMS[Other Systems]
+      X1[(PostgreSQL)]
+      X2[(OpenSearch)]
+      X3[(Redis)]
+    end
+  end
+
+  %% Main flow
+  A[Product APIs & Services] -->|commands| B
+  B -->|enqueue| C
+  C --> D
+
+  %% Plugins feed both internal & external systems
+  D --> E
+  D --> X1
+  D --> X2
+  D --> X3
+
+  %% Products read from internal & external sources
+  E --> A
+  X1 --> A
+  X2 --> A
+  X3 --> A
+
+  %% External users
+  F[End Users & Clients] -->|http/graphql/etc| A
+
+  %% Forbidden path
+  F -.->|no direct access| B
+
+  %% Styles
+  style B fill:#0d3b66,stroke:#0d3b66,color:#fff
+  style WRITE_SIDE fill:#0d3b6620,stroke:#0d3b6644
+  style READ_PIPELINE fill:#f5f5f5,stroke:#ccc
+  style INTERNAL_READS fill:#ffffff,stroke:#ccc
+  style EXTERNAL_SYSTEMS fill:#ffffff,stroke:#ccc
+  style F stroke:#888
+```
+
+<Note>
+  The diagram shows commands flowing into EventDBX, jobs entering the plugin
+  queue, and fan-out into read models that front the user-facing APIs.
+</Note>
+
 ## Choose your next step
 
 <CardGroup cols={3}>

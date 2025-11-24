@@ -19,5 +19,3 @@ dbx plugin config log --name audit-log --level info --template "agg={aggregate} 
 
 - Local debugging without extra infrastructure.
 - Lightweight audit trails where log collectors (Splunk/Datadog/etc.) already ingest application logs.
-
-Logs emit on the `eventdbx.plugin.log` target; forward them with your existing log pipeline. For stronger delivery guarantees, pair with HTTP/TCP/Capnp/process plugins.

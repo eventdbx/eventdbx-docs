@@ -57,8 +57,8 @@ Schemas are stored on disk and enforced whenever restriction mode is `default` o
 ## Aggregates
 
 - `dbx aggregate create --aggregate <type> --aggregate-id <id> --event <name> [--field KEY=VALUE...] [--payload <json>] [--metadata <json>] [--note <text>] [--token <value>] [--json]`
-- `dbx aggregate apply --aggregate <type> --aggregate-id <id> --event <name> --field KEY=VALUE... [--payload <json>] [--stage] [--token <value>] [--note <text>]`
-- `dbx aggregate patch --aggregate <type> --aggregate-id <id> --event <name> --patch <json> [--stage] [--token <value>] [--metadata <json>] [--note <text>]`
+- `dbx aggregate apply --aggregate <type> --aggregate-id <id> --event <name> --field KEY=VALUE... [--payload <json>] [--publish PLUGIN[:MODE[:PRIORITY]] ...] [--stage] [--token <value>] [--note <text>]`
+- `dbx aggregate patch --aggregate <type> --aggregate-id <id> --event <name> --patch <json> [--publish PLUGIN[:MODE[:PRIORITY]] ...] [--stage] [--token <value>] [--metadata <json>] [--note <text>]`
 - `dbx aggregate list [--aggregate <type>] [--cursor <token>] [--take <n>] [--stage] [--filter <expr>] [--sort <field[:order],...>] [--include-archived|--archived-only]`
 - `dbx aggregate get --aggregate <type> --aggregate-id <id> [--version <u64>] [--include-events]`
 - `dbx aggregate verify --aggregate <type> --aggregate-id <id>`
@@ -66,6 +66,8 @@ Schemas are stored on disk and enforced whenever restriction mode is `default` o
 - `dbx aggregate archive|restore --aggregate <type> --aggregate-id <id> [--comment <text>]`
 - `dbx aggregate remove --aggregate <type> --aggregate-id <id>` – only succeeds when version is still 0.
 - `dbx aggregate commit` – flush all staged events in a single atomic batch.
+
+`--publish` can be repeated to target specific plugins per write (`PLUGIN[:MODE[:PRIORITY]]`); omit it to fan out to all enabled plugins using their configured payload modes.
 
 Complexity hints live on the [features page](/features#aggregate-operation-costs). Hot aggregates typically stay in the RocksDB block cache, keeping latency near-constant.
 
