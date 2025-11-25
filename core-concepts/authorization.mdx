@@ -1,0 +1,105 @@
+---
+title: "Authorization"
+description: "Scope EventDBX tokens with actions, resources, tenants, and sensible TTLs."
+---
+
+EventDBX keeps authorization simple and explicit: every request carries a bearer token, and that token spells out which verbs it can execute, which aggregates it can touch, and which tenants it applies to. This page shows how to express those scopes with `--action`, `--resource`, and `--tenant` so you can hand out least-privilege credentials that mirror the way you partition domains and services.
+
+Tokens gate every control-socket call. They carry three main claims:
+
+- **Actions** – verbs such as `aggregate.read` or `schema.write`.
+- **Resources** – what the action can touch; defaults to `"*"` unless you scope it.
+- **Tenants** – which tenants the token may access (required by `dbx token generate`; repeat `--tenant` for more).
+
+Wildcard matching
+- `*` matches any length; `?` matches a single character.
+- `*.*` (actions) and `*` (resources) are root-level patterns—use sparingly.
+
+## Common actions
+
+- `aggregate.read`, `aggregate.create`, `aggregate.append`, `aggregate.archive`
+- `schema.read`, `schema.write`
+- `tenant.manage`
+- `*.*` (root; equivalent to “all actions”)
+
+Actions without resources
+- `schema.read`, `schema.write`, and `tenant.manage` only check the action; `--resource` is ignored for these. Passing none is fine.
+
+## Resource patterns
+
+- `aggregate:<type>:<id>` – single aggregate (`aggregate:orders:123`)
+- `aggregate:<type>:*` – any id of that type (`aggregate:orders:*`)
+- `aggregate:*:*` – any aggregate
+- `*` – any resource (CLI default)
+
+If a command checks only the action (for example, `schema.read`), you can omit `--resource`; the CLI will set it to `"*"`.
+
+## Examples
+
+### Admin (root) token for one tenant
+
+```bash
+dbx token generate \
+  --group platform --user admin \
+  --action "*.*" --resource "*" \
+  --tenant prod \
+  --ttl 7200
+```
+
+### Read-only access to one aggregate type
+
+```bash
+dbx token generate \
+  --group analytics --user reader \
+  --action aggregate.read \
+  --resource "aggregate:orders:*" \
+  --tenant prod \
+  --ttl 1800
+```
+
+### Writer for a service (create + append)
+
+```bash
+dbx token generate \
+  --group svc-orders --user api \
+  --action aggregate.create \
+  --action aggregate.append \
+  --resource "aggregate:orders:*" \
+  --tenant prod \
+  --write-limit 1000 \
+  --ttl 900
+```
+
+### Narrow access to a single aggregate
+
+```bash
+dbx token generate \
+  --group support --user agent \
+  --action aggregate.read \
+  --action aggregate.append \
+  --resource "aggregate:customers:42" \
+  --tenant prod \
+  --ttl 600
+```
+
+### Schema admin
+
+```bash
+dbx token generate \
+  --group platform --user schemas \
+  --action schema.write \
+  --resource "*" \
+  --tenant prod
+```
+
+Tips
+- Prefer short TTLs and `--write-limit` for automation.
+- Repeat `--tenant` to authorize multiple tenants; calls fail if the tenant is not present in the token.
+- Use `dbx token refresh` to rotate without re-provisioning clients.
+
+## How this maps to other systems
+
+- Think of `action` as an IAM “permission” (for example, `aggregate.append` ≈ “write events”), and `resource` as an IAM resource ARN-like filter (`aggregate:orders:*` ≈ “all orders aggregates”).
+- Wildcards behave like glob patterns, not regex; keep them narrow to avoid overreach in audits.
+- Plugins and SDKs only need bearer tokens—no cookies or sessions—so you can mint short-lived, task-specific credentials the same way you would scoped API tokens in other platforms.
+- If you federate identity elsewhere (OAuth2/JWT providers), you can mint EventDBX tokens from a service role and pass tenant/action/resource scopes that mirror the upstream role’s permissions.
