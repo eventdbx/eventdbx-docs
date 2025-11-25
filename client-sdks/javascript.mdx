@@ -163,10 +163,12 @@ await client.patch("person", "p-110", "person_registered", [
   { op: "replace", path: "/first_name", value: "Jayah" },
 ]);
 
-// archive / restore – toggle write access while keeping reads online
+// archive – archive an aggregate, move to secondary index
 await client.archive("person", "p-110", {
   comment: "big beautiful comment",
 });
+
+// restore – restore an aggreate, mvoe to primary index
 await client.restore("person", "p-110");
 ```
 
@@ -227,23 +229,98 @@ When you sort aggregates by `created_at` or `updated_at`, you can use shorthand 
 The SDK exports helper types so you can strongly type payloads, retries, and pagination in your application.
 
 ```ts
-export type JsonValue =
-  | null
-  | string
-  | number
-  | boolean
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+/* eslint-disable */
+export declare class DbxClient {
+  constructor(options?: ClientOptions | undefined | null);
+  /** Establish a TCP connection to the EventDBX control socket. */
+  connect(): Promise<void>;
+  /** Close the underlying socket, if connected. */
+  disconnect(): Promise<void>;
+  /** Returns `true` if a socket connection is currently held. */
+  isConnected(): Promise<boolean>;
+  /** Returns the configured endpoint (host/port). */
+  get endpoint(): ClientEndpoint;
+  /** List aggregates, optionally restricting to a specific aggregate type. */
+  list(
+    aggregateType?: string | undefined | null,
+    options?: PageOptions | undefined | null
+  ): Promise<PageResult>;
+  /** Fetch a single aggregate snapshot. */
+  get(aggregateType: string, aggregateId: string): Promise<any | null>;
+  /** Select a subset of fields from an aggregate snapshot. */
+  select(
+    aggregateType: string,
+    aggregateId: string,
+    fields: Array<string>
+  ): Promise<any | null>;
+  /** List events for an aggregate. */
+  events(
+    aggregateType: string,
+    aggregateId: string,
+    options?: PageOptions | undefined | null
+  ): Promise<PageResult>;
+  /** Append a new event with an arbitrary JSON payload. */
+  apply(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    options?: AppendOptions | undefined | null
+  ): Promise<any>;
+  /** Create an aggregate and emit its initial event. */
+  create(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    options?: CreateAggregateOptions | undefined | null
+  ): Promise<any>;
+  /** Archive an aggregate. */
+  archive(
+    aggregateType: string,
+    aggregateId: string,
+    options?: SetArchiveOptions | undefined | null
+  ): Promise<any>;
+  /** Restore an archived aggregate. */
+  restore(
+    aggregateType: string,
+    aggregateId: string,
+    options?: SetArchiveOptions | undefined | null
+  ): Promise<any>;
+  /** Apply a JSON Patch to the aggregate. Returns the updated snapshot. */
+  patch(
+    aggregateType: string,
+    aggregateId: string,
+    eventType: string,
+    operations: JsonPatch[],
+    options?: PatchOptions | undefined | null
+  ): Promise<any>;
+  /** Create a snapshot for the provided aggregate. */
+  createSnapshot(
+    aggregateType: string,
+    aggregateId: string,
+    options?: CreateSnapshotOptions | undefined | null
+  ): Promise<any>;
+  /** List snapshots with optional aggregate filters. */
+  listSnapshots(
+    options?: ListSnapshotsOptions | undefined | null
+  ): Promise<Array<any>>;
+  /** Fetch a snapshot by identifier. */
+  getSnapshot(
+    snapshotId: bigint | number,
+    options?: GetSnapshotOptions | undefined | null
+  ): Promise<any | null>;
+}
 
-export type JsonPatch =
-  | { op: "add" | "replace" | "test"; path: string; value: JsonValue }
-  | { op: "remove"; path: string }
-  | { op: "move" | "copy"; from: string; path: string };
+export interface AppendOptions {
+  payload?: JsonValue;
+  metadata?: JsonValue;
+  note?: string;
+  token?: string;
+  publishTargets?: Array<PublishTargetOptions>;
+}
 
-export interface RetryOptions {
-  attempts?: number;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
+export interface ClientEndpoint {
+  ip: string;
+  port: number;
 }
 
 export interface ClientOptions {
@@ -255,14 +332,56 @@ export interface ClientOptions {
   retry?: RetryOptions;
 }
 
-export interface ClientEndpoint {
-  ip: string;
-  port: number;
+export interface CreateAggregateOptions {
+  token?: string;
+  payload?: JsonValue;
+  metadata?: JsonValue;
+  note?: string;
+  publishTargets?: Array<PublishTargetOptions>;
 }
 
-export interface AggregateSortInput {
-  field: string;
-  descending?: boolean;
+export declare function createClient(
+  options?: ClientOptions | undefined | null
+): DbxClient;
+
+export interface CreateSnapshotOptions {
+  token?: string;
+  comment?: string;
+}
+
+export interface GetSnapshotOptions {
+  token?: string;
+}
+
+export type JsonPatch =
+  | JsonPatchAddReplaceTest
+  | JsonPatchRemove
+  | JsonPatchMoveCopy;
+
+export interface JsonPatchAddReplaceTest {
+  op: "add" | "replace" | "test";
+  path: string;
+  value: JsonValue;
+}
+
+export interface JsonPatchMoveCopy {
+  op: "move" | "copy";
+  from: string;
+  path: string;
+}
+
+export interface JsonPatchRemove {
+  op: "remove";
+  path: string;
+}
+
+export type JsonValue = any;
+
+export interface ListSnapshotsOptions {
+  aggregateType?: string;
+  aggregateId?: string;
+  version?: bigint | number;
+  token?: string;
 }
 
 export interface PageOptions {
@@ -272,7 +391,7 @@ export interface PageOptions {
   archivedOnly?: boolean;
   token?: string;
   filter?: string;
-  sort?: Array<AggregateSortInput>;
+  sort?: string;
 }
 
 export interface PageResult {
@@ -280,112 +399,45 @@ export interface PageResult {
   nextCursor?: string;
 }
 
-export interface AppendOptions {
-  payload?: any;
-  metadata?: any;
+export interface PatchOptions {
+  metadata?: JsonValue;
   note?: string;
   token?: string;
+  publishTargets?: Array<PublishTargetOptions>;
 }
 
-export interface CreateAggregateOptions {
-  token?: string;
-  payload?: any;
-  metadata?: any;
-  note?: string;
+export declare const enum PayloadMode {
+  All = "all",
+  EventOnly = "event-only",
+  StateOnly = "state-only",
+  SchemaOnly = "schema-only",
+  EventAndSchema = "event-and-schema",
+  ExtensionsOnly = "extensions-only",
+}
+
+export declare const enum Priority {
+  High = "high",
+  Normal = "normal",
+  Low = "low",
+}
+
+export interface PublishTargetOptions {
+  plugin: string;
+  mode?: PayloadMode;
+  priority?: Priority;
+}
+
+export interface RetryOptions {
+  attempts?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
 }
 
 export interface SetArchiveOptions {
   token?: string;
+  note?: string;
   comment?: string;
 }
-
-export interface PatchOptions {
-  metadata?: any;
-  note?: string;
-  token?: string;
-}
-
-export interface Aggregate<TState = JsonValue> {
-  aggregateType: string;
-  aggregateId: string;
-  version: number;
-  state: TState;
-  merkleRoot: string;
-  archived: boolean;
-}
-
-export interface Event<TPayload = JsonValue> {
-  aggregateType: string;
-  aggregateId: string;
-  eventType: string;
-  version: number;
-  sequence: number;
-  payload: TPayload;
-  metadata: {
-    eventId: string;
-    createdAt: string;
-    issuedBy?: { group?: string; user?: string };
-    note?: string | null;
-  };
-  hash: string;
-  merkleRoot: string;
-}
-
-export declare class DbxClient {
-  constructor(options?: ClientOptions | undefined | null);
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  isConnected(): Promise<boolean>;
-  get endpoint(): ClientEndpoint;
-  list(
-    aggregateType?: string | undefined | null,
-    options?: PageOptions | undefined | null
-  ): Promise<PageResult>;
-  get(aggregateType: string, aggregateId: string): Promise<any | null>;
-  select(
-    aggregateType: string,
-    aggregateId: string,
-    fields: Array<string>
-  ): Promise<any | null>;
-  events(
-    aggregateType: string,
-    aggregateId: string,
-    options?: PageOptions | undefined | null
-  ): Promise<PageResult>;
-  apply(
-    aggregateType: string,
-    aggregateId: string,
-    eventType: string,
-    options?: AppendOptions | undefined | null
-  ): Promise<any>;
-  create(
-    aggregateType: string,
-    aggregateId: string,
-    eventType: string,
-    options?: CreateAggregateOptions | undefined | null
-  ): Promise<any>;
-  archive(
-    aggregateType: string,
-    aggregateId: string,
-    options?: SetArchiveOptions | undefined | null
-  ): Promise<any>;
-  restore(
-    aggregateType: string,
-    aggregateId: string,
-    options?: SetArchiveOptions | undefined | null
-  ): Promise<any>;
-  patch(
-    aggregateType: string,
-    aggregateId: string,
-    eventType: string,
-    operations: Array<JsonPatch>,
-    options?: PatchOptions | undefined | null
-  ): Promise<any>;
-}
-
-export declare function createClient(
-  options?: ClientOptions | undefined | null
-): DbxClient;
 ```
 
 The generated `index.d.ts` file still types aggregate and event payloads as `any`, but the runtime values follow the `Aggregate` and `Event` shapes above, so you can layer your own domain-specific interfaces on top.
