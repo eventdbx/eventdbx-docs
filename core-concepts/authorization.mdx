@@ -17,7 +17,11 @@ Wildcard matching
 
 ## Common actions
 
-- `aggregate.read`, `aggregate.create`, `aggregate.append`, `aggregate.archive`
+- Aggregates (only): `aggregate.read`, `aggregate.create`, `aggregate.append`, `aggregate.archive`
+  - `aggregate.read` – list aggregates, get one, list events, list/get snapshots, select fields.
+  - `aggregate.append` – apply/patch events and create snapshots.
+  - `aggregate.archive` – archive or restore an aggregate.
+  - `aggregate.create` – create a new aggregate.
 - `schema.read`, `schema.write`
 - `tenant.manage`
 - `*.*` (root; equivalent to “all actions”)
