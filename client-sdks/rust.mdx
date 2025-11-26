@@ -5,13 +5,22 @@ description: "Tokio-native EventDBX client with Noise-by-default transport and p
 
 `eventdbx-client` is an async crate that speaks the EventDBX control socket (Cap'n Proto over TCP with a Noise XX handshake derived from your token). It covers list/get/select/events reads plus create/apply/patch/archive mutations.
 
+## Feature highlights
+
+- Tokio-native async client; connect once with `EventDbxClient::connect` and reuse the socket.
+- Noise XX (+ PSK from your token) on by default; opt out with `.with_noise(false)` when the server permits plaintext.
+- Serde-friendly JSON payloads/metadata for `create`, `append`, `patch`, and archive/restore helpers.
+- Pagination, filters, and sort directives (`created_at`, `aggregate_id`, etc.) on `list_aggregates` and `list_events`.
+- Per-call overrides for publish targets, notes, metadata, and tokens to scope mutations.
+- Configurable connect/request timeouts (defaults: 5s connect, 10s request).
+
 ## Install
 
 ```bash
 cargo add eventdbx-client
 ```
 
-## Quickstart
+## Connect and configure
 
 ```rust
 use eventdbx_client::{
@@ -22,10 +31,18 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() -> eventdbx_client::Result<()> {
-    let config = ClientConfig::new("127.0.0.1", std::env::var("EVENTDBX_TOKEN")?)
-        .with_tenant(std::env::var("EVENTDBX_TENANT").unwrap_or_else(|_| "default".into()))
-        .with_port(6363)
-        .with_noise(true); // set false (or EVENTDBX_NO_NOISE=1 on the server) to request plaintext
+    let config = ClientConfig::new(
+        std::env::var("EVENTDBX_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        std::env::var("EVENTDBX_TOKEN")?,
+    )
+    .with_tenant(std::env::var("EVENTDBX_TENANT").unwrap_or_else(|_| "default".into()))
+    .with_port(
+        std::env::var("EVENTDBX_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(6363),
+    )
+    .with_noise(true); // set false to request plaintext when the server allows it
 
     let client = EventDbxClient::connect(config).await?;
 
@@ -59,6 +76,24 @@ async fn main() -> eventdbx_client::Result<()> {
 }
 ```
 
+`ClientConfig::new(host, token)` defaults to `port = 6363`, `tenant = "default"`, Noise enabled, `connect_timeout = 5s`, and `request_timeout = 10s` per RPC. Build one config per tenant/token and reuse the client for the process lifetime. Call `.with_request_timeout(None)` to disable per-call timeouts.
+
+## Runtime configuration
+
+| Variable            | Default     | Description                                                                          |
+| ------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| `EVENTDBX_HOST`     | `127.0.0.1` | Hostname or IP address of the control socket.                                        |
+| `EVENTDBX_PORT`     | `6363`      | TCP port for the control plane.                                                      |
+| `EVENTDBX_TOKEN`    | _empty_     | Control token forwarded during the handshake.                                        |
+| `EVENTDBX_TENANT`   | `default`   | Tenant identifier included in the initial hello.                                     |
+| `EVENTDBX_NO_NOISE` | `false`     | Set `1/true` on the server side to permit plaintext; pair with `.with_noise(false)`. |
+
+The crate does not read these automatically; pass them into `ClientConfig` as shown above.
+
+## Manage authentication and tenancy
+
+Pass the control token and tenant into `ClientConfig` up front. Per-call token overrides are available on request structs/options (`ListAggregatesOptions.token`, `AppendEventRequest.token`, etc.) so you can scope permissions to a user session without rebuilding the client.
+
 ## Publish targets
 
 Direct mutations to specific plugins and override payload mode/priority per call:
@@ -67,7 +102,8 @@ Direct mutations to specific plugins and override payload mode/priority per call
 use eventdbx_client::{AppendEventRequest, PublishTarget};
 use serde_json::json;
 
-let mut request = AppendEventRequest::new("invoice", "inv-1", "invoice_created", json!({}));
+let mut request =
+    AppendEventRequest::new("invoice", "inv-1", "invoice_created", json!({}));
 request.publish_targets = vec![
     PublishTarget::new("analytics-engine").with_mode("event-only"),
     PublishTarget::new("fraud-worker").with_mode("all").with_priority("high"),
@@ -77,35 +113,15 @@ client.append_event(request).await?;
 
 Skip `publish_targets` to fan out to all enabled plugins with their default payload mode. Publish targets are only effective when the named plugins are installed, configured, and running.
 
-## Common verbs
+## Write aggregates and events
 
 ```rust
 use eventdbx_client::{
-    AppendEventRequest, CreateAggregateRequest, EventDbxClient, ListAggregatesOptions,
-    ListEventsOptions, PatchEventRequest, PublishTarget, SelectAggregateRequest,
+    AppendEventRequest, CreateAggregateRequest, EventDbxClient, PatchEventRequest, PublishTarget,
     SetAggregateArchiveRequest,
 };
 use serde_json::json;
 
-// list
-let mut list = ListAggregatesOptions::default();
-list.take = Some(20);
-list.sort_text = Some("created_at:desc".into());
-let aggregates = client.list_aggregates(list).await?;
-
-// get
-let got = client.get_aggregate("person", "p-110").await?;
-
-// select projection
-let select = client
-    .select_aggregate(SelectAggregateRequest::new(
-        "person",
-        "p-110",
-        vec!["payload.email".into(), "metadata.@actor".into()],
-    ))
-    .await?;
-
-// create (first event + snapshot)
 let mut create = CreateAggregateRequest::new(
     "person",
     "p-120",
@@ -115,7 +131,6 @@ let mut create = CreateAggregateRequest::new(
 create.publish_targets.push(PublishTarget::new("search"));
 let created = client.create_aggregate(create).await?;
 
-// append
 let mut append = AppendEventRequest::new(
     "person",
     "p-120",
@@ -125,7 +140,6 @@ let mut append = AppendEventRequest::new(
 append.note = Some("user changed email".into());
 client.append_event(append).await?;
 
-// patch
 let mut patch = PatchEventRequest::new(
     "person",
     "p-120",
@@ -134,32 +148,64 @@ let mut patch = PatchEventRequest::new(
 );
 client.patch_event(patch).await?;
 
-// archive + restore
 let mut archive = SetAggregateArchiveRequest::new("person", "p-120", true);
 archive.note = Some("cleanup".into());
 client.set_aggregate_archive(archive).await?;
 
 let restore = SetAggregateArchiveRequest::new("person", "p-120", false);
 client.set_aggregate_archive(restore).await?;
+```
 
-// list events
+`create_aggregate` seeds a snapshot and first event atomically, `append_event` appends events, `patch_event` issues RFC 6902 operations against historical payloads, and `set_aggregate_archive` toggles write access while preserving history.
+
+## Read aggregates and events
+
+```rust
+use eventdbx_client::{
+    EventDbxClient, ListAggregatesOptions, ListEventsOptions, SelectAggregateRequest,
+};
+
+let got = client.get_aggregate("person", "p-110").await?;
+
+let select = client
+    .select_aggregate(SelectAggregateRequest::new(
+        "person",
+        "p-110",
+        vec!["payload.email".into(), "metadata.@actor".into()],
+    ))
+    .await?;
+
+let mut list = ListAggregatesOptions::default();
+list.take = Some(20);
+list.sort_text = Some("created_at:desc".into());
+let aggregates = client.list_aggregates(list).await?;
+if let Some(cursor) = aggregates.next_cursor.as_deref() {
+    let mut next = ListAggregatesOptions::default();
+    next.cursor = Some(cursor.to_string());
+    let more = client.list_aggregates(next).await?;
+}
+
 let events = client
     .list_events("person", "p-120", ListEventsOptions::default())
     .await?;
+
+let merkle = client.verify_aggregate("person", "p-120").await?;
 ```
 
-## Configuration
+Use `next_cursor` to resume pagination. `verify_aggregate` returns the Merkle root for integrity checks.
 
-`ClientConfig::new(host, token)` sets sensible defaults (`port = 6363`, `tenant = "default"`, `request_timeout = 10s`, Noise enabled). Override as needed:
+## Filters, sorting, and pagination
 
-- `.with_tenant("tenant-123")`
-- `.with_port(7000)`
-- `.with_request_timeout(None)` to disable per-RPC timeouts
-- `.with_connect_timeout(Duration::from_secs(2))`
-- `.with_noise(false)` to request a plaintext control channel (testing only)
+Filters use the same SQL-like grammar as the server (`field = value AND other_field > 10`). Sort directives accept fields like `aggregate_id`, `aggregate_type`, `created_at`, `updated_at`, and `archived`. Pass a string (`"created_at:desc, aggregate_id:asc"`) via `ListAggregatesOptions.sort_text` or build `AggregateSort` entries. Use `include_archived` / `archived_only` when traversing soft-deleted aggregates. Feed `next_cursor` back into subsequent `list_aggregates` calls to continue paging.
 
-## Supported operations
+## Noise transport
 
-- Reads: `list_aggregates`, `list_events`, `get_aggregate`, `select_aggregate`, `verify_aggregate`.
-- Writes: `append_event`, `create_aggregate`, `patch_event`, `set_aggregate_archive` (archive/restore).
-- Options: per-call token overrides, notes, metadata JSON, publish targets, pagination cursors, filter expressions, and sort directives (`"created_at:desc, aggregate_id:asc"`).
+Noise XX is enabled by default using a PSK derived from your control token. Disable it only for controlled testing with `.with_noise(false)` and a server configured to honor `EVENTDBX_NO_NOISE`; production deployments should keep Noise on.
+
+## Development & testing
+
+```bash
+cargo test
+```
+
+Use `cargo check` for quick compilation cycles and `cargo fmt --check` in CI to keep formatting consistent.
