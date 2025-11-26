@@ -1,102 +1,165 @@
 ---
 title: "Rust SDK"
-description: "Tokio-native EventDBX client with strongly typed payload builders and tracing hooks."
+description: "Tokio-native EventDBX client with Noise-by-default transport and publish-target routing."
 ---
 
-The Rust crate (`eventdbx-client`) exposes async/await primitives, request builders, and optional features for telemetry and test tooling. It works with stable Rust 1.70+ and tokio 1.0.
+`eventdbx-client` is an async crate that speaks the EventDBX control socket (Cap'n Proto over TCP with a Noise XX handshake derived from your token). It covers list/get/select/events reads plus create/apply/patch/archive mutations.
 
 ## Install
 
 ```bash
 cargo add eventdbx-client
-# enable extras
-target.'cfg(test)'.dependencies.eventdbx-client = { version = "0.5", features = ["telemetry", "test-utils"] }
 ```
 
-## Connect and append events
+## Quickstart
 
 ```rust
 use eventdbx_client::{
-    AppendEventRequest, ClientConfig, EventDbxClient, ListAggregatesOptions,
+    AppendEventRequest, ClientConfig, EventDbxClient, ListAggregatesOptions, PublishTarget,
+    SetAggregateArchiveRequest,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{json, to_value};
-use std::time::Duration;
-
-#[derive(Serialize, Deserialize)]
-struct PersonRegistered {
-    first_name: String,
-    last_name: String,
-    email: String,
-}
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> eventdbx_client::Result<()> {
-    let config = ClientConfig::builder()
-        .host("127.0.0.1")
-        .tenant("people")
-        .token(std::env::var("EVENTDBX_TOKEN")?)
-        .port(6363)
-        .timeout(Duration::from_secs(5))
-        .build();
+    let config = ClientConfig::new("127.0.0.1", std::env::var("EVENTDBX_TOKEN")?)
+        .with_tenant(std::env::var("EVENTDBX_TENANT").unwrap_or_else(|_| "default".into()))
+        .with_port(6363)
+        .with_noise(true); // set false (or EVENTDBX_NO_NOISE=1 on the server) to request plaintext
 
     let client = EventDbxClient::connect(config).await?;
 
-    let append = AppendEventRequest::new(
+    // append an event with metadata and publish targets
+    let mut append = AppendEventRequest::new(
         "person",
         "p-110",
         "person_registered",
-        to_value(PersonRegistered {
-            first_name: "Nia".into(),
-            last_name: "Patel".into(),
-            email: "nia@example.com".into(),
-        })?,
-    )
-    .metadata(json!({ "@actor": "svc-directory" }));
-
+        json!({ "first_name": "Nia", "last_name": "Patel", "email": "nia@example.com" }),
+    );
+    append.metadata = Some(json!({ "@actor": "svc-directory" }));
+    append.note = Some("seed data".into());
+    append
+        .publish_targets
+        .push(PublishTarget::new("search-indexer").with_mode("event-only"));
     client.append_event(append).await?;
 
-    let aggregates = client
-        .list_aggregates(ListAggregatesOptions::default().aggregate_type("person"))
-        .await?;
-    println!("returned {} aggregates", aggregates.aggregates.len());
+    // list aggregates with sort + pagination
+    let mut list_opts = ListAggregatesOptions::default();
+    list_opts.take = Some(10);
+    list_opts.sort_text = Some("created_at:desc, aggregate_id:asc".into());
+    let aggregates = client.list_aggregates(list_opts).await?;
+    println!("aggregates: {}", aggregates.aggregates);
+
+    // archive an aggregate with a note
+    let mut archive = SetAggregateArchiveRequest::new("person", "p-110", true);
+    archive.note = Some("cleanup".into());
+    client.set_aggregate_archive(archive).await?;
 
     Ok(())
 }
 ```
 
-- Builders enforce required fields at compile time and keep payloads strongly typed via `serde`.
-- Configure retries, Noise session parameters, and keepalive intervals through `ClientConfig::builder()`.
+## Publish targets
 
-## Read models and projections
+Direct mutations to specific plugins and override payload mode/priority per call:
 
 ```rust
-let state = client.get_state::<PersonRegistered>("person", "p-110").await?;
+use eventdbx_client::{AppendEventRequest, PublishTarget};
+use serde_json::json;
+
+let mut request = AppendEventRequest::new("invoice", "inv-1", "invoice_created", json!({}));
+request.publish_targets = vec![
+    PublishTarget::new("analytics-engine").with_mode("event-only"),
+    PublishTarget::new("fraud-worker").with_mode("all").with_priority("high"),
+];
+client.append_event(request).await?;
+```
+
+Skip `publish_targets` to fan out to all enabled plugins with their default payload mode. Publish targets are only effective when the named plugins are installed, configured, and running.
+
+## Common verbs
+
+```rust
+use eventdbx_client::{
+    AppendEventRequest, CreateAggregateRequest, EventDbxClient, ListAggregatesOptions,
+    ListEventsOptions, PatchEventRequest, PublishTarget, SelectAggregateRequest,
+    SetAggregateArchiveRequest,
+};
+use serde_json::json;
+
+// list
+let mut list = ListAggregatesOptions::default();
+list.take = Some(20);
+list.sort_text = Some("created_at:desc".into());
+let aggregates = client.list_aggregates(list).await?;
+
+// get
+let got = client.get_aggregate("person", "p-110").await?;
+
+// select projection
 let select = client
-    .select_fields("person", "p-110", ["payload.email", "metadata.@actor"])
+    .select_aggregate(SelectAggregateRequest::new(
+        "person",
+        "p-110",
+        vec!["payload.email".into(), "metadata.@actor".into()],
+    ))
+    .await?;
+
+// create (first event + snapshot)
+let mut create = CreateAggregateRequest::new(
+    "person",
+    "p-120",
+    "person_registered",
+    json!({ "first_name": "Ari", "email": "ari@example.com" }),
+);
+create.publish_targets.push(PublishTarget::new("search"));
+let created = client.create_aggregate(create).await?;
+
+// append
+let mut append = AppendEventRequest::new(
+    "person",
+    "p-120",
+    "person_email_updated",
+    json!({ "email": "ari+alerts@example.com" }),
+);
+append.note = Some("user changed email".into());
+client.append_event(append).await?;
+
+// patch
+let mut patch = PatchEventRequest::new(
+    "person",
+    "p-120",
+    "person_registered",
+    json!([{ "op": "replace", "path": "/email", "value": "ari@corp.example" }]),
+);
+client.patch_event(patch).await?;
+
+// archive + restore
+let mut archive = SetAggregateArchiveRequest::new("person", "p-120", true);
+archive.note = Some("cleanup".into());
+client.set_aggregate_archive(archive).await?;
+
+let restore = SetAggregateArchiveRequest::new("person", "p-120", false);
+client.set_aggregate_archive(restore).await?;
+
+// list events
+let events = client
+    .list_events("person", "p-120", ListEventsOptions::default())
     .await?;
 ```
 
-- `get_state::<T>` automatically deserializes payloads into domain structs.
-- `select_fields` returns sparse JSON for read-heavy paths where you only need part of the aggregate.
+## Configuration
 
-## Tracing and metrics
+`ClientConfig::new(host, token)` sets sensible defaults (`port = 6363`, `tenant = "default"`, `request_timeout = 10s`, Noise enabled). Override as needed:
 
-Enable the `telemetry` feature to wire into `tracing` and `metrics` crates:
+- `.with_tenant("tenant-123")`
+- `.with_port(7000)`
+- `.with_request_timeout(None)` to disable per-RPC timeouts
+- `.with_connect_timeout(Duration::from_secs(2))`
+- `.with_noise(false)` to request a plaintext control channel (testing only)
 
-```rust
-let client = EventDbxClient::connect(
-    ClientConfig::new("127.0.0.1", token)
-        .with_tracing(true)
-        .with_metrics(true),
-)
-.await?;
-```
+## Supported operations
 
-The client emits spans for every API operation and records per-call latency and retry counters.
-
-## Testing support
-
-- `eventdbx_client::testkit::Sandbox` boots an ephemeral daemon for integration tests and tears it down automatically.
-- `EventDbxClient::fake()` returns a deterministic stub you can seed with canned aggregates.
-- Use `AppendEventRequest::from_fixture("tests/fixtures/person.json")` to replay JSON fixtures into the sandbox.
+- Reads: `list_aggregates`, `list_events`, `get_aggregate`, `select_aggregate`, `verify_aggregate`.
+- Writes: `append_event`, `create_aggregate`, `patch_event`, `set_aggregate_archive` (archive/restore).
+- Options: per-call token overrides, notes, metadata JSON, publish targets, pagination cursors, filter expressions, and sort directives (`"created_at:desc, aggregate_id:asc"`).

@@ -47,6 +47,21 @@ dbx aggregate apply orders order-1 order_created \
   --publish analytics-engine:state-only
 ```
 
+More examples:
+
+```bash
+# Patch an event and send only to the ETL plugin with default priority
+dbx aggregate patch orders order-1 order_created \
+  --patch '[{ "op": "replace", "path": "/status", "value": "paid" }]' \
+  --publish etl:state-only
+
+# Create and fan out to two plugins with different modes and priority
+dbx aggregate create orders order-2 order_created \
+  --payload '{"status":"pending"}' \
+  --publish search-indexer:event-only:high \
+  --publish audit-log:all
+```
+
 Each `--publish` entry is `PLUGIN[:MODE[:PRIORITY]]`:
 
 - `PLUGIN` – configured plugin name (must be enabled).

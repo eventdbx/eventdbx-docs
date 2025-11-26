@@ -77,9 +77,9 @@ pip install eventdbx
 ```python
 import json
 
-from eventdbx import EventDBXClient
+from eventdbx import EventDBXClient, PublishTarget
 
-with EventDBXClient(token="<token>", tenant_id="<tenant_id>") as client:
+with EventDBXClient(token="<token>", tenant_id="<tenant_id>", no_noise=False) as client:
     # Create a brand-new aggregate via the control plane
     created = client.create(
         aggregate_type="person",
@@ -88,6 +88,7 @@ with EventDBXClient(token="<token>", tenant_id="<tenant_id>") as client:
         payload_json=json.dumps(
             {"first_name": "Ari", "last_name": "Diaz", "email": "ari@example.com"}
         ),
+        publish_targets=[PublishTarget(plugin="webhook", mode="async")],
     )
 
     # Append follow-up events to the aggregate
@@ -115,9 +116,9 @@ with EventDBXClient(token="<token>", tenant_id="<tenant_id>") as client:
 
 Features:
 
-- Async + sync APIs.
-- Typed payload helpers via `pydantic`.
-- Built-in retry with exponential backoff.
+- Synchronous TCP client with Noise security by default and an opt-out `no_noise` flag for lab setups.
+- Built-in retry with exponential backoff and verbose/non-verbose mutation responses.
+- Publish target routing plus archive/restore, JSON Patch, snapshots, and schema/tenant admin helpers.
 
 ## Java (Coming Soon)
 

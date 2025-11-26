@@ -3,7 +3,15 @@ title: "Java SDK"
 description: "Write aggregates and build projections using the JVM-native EventDBX client."
 ---
 
-The Java SDK targets Java 11+ and publishes to Maven Central under `com.eventdbx:eventdbx-client`. It exposes blocking, CompletableFuture, and Reactor-based APIs so you can integrate with Spring, Micronaut, Quarkus, or Vert.x stacks.
+The Java SDK targets Java 17+ and mirrors the Node.js control client. It opens a persistent TCP connection to the EventDBX control socket, negotiates Noise + Cap'n Proto frames, and exposes blocking APIs for aggregate mutations, queries, and pagination. Defaults read from `EVENTDBX_*` environment variables so you can drop it into Spring, Micronaut, Quarkus, or standalone JVM services.
+
+## Feature highlights
+
+- Blocking control-socket client with parity to `eventdbxjs` (`create`, `apply`, `patch`, `archive` / `restore`, `list`, `events`, `get`, `select`).
+- Noise XX (+ PSK) transport enabled by default; opt into plaintext with `noNoise` / `EVENTDBX_NO_NOISE` when the server allows it.
+- Publish target routing per mutation via `PublishTarget.of(...)` or `publishTarget("plugin:mode:priority")`.
+- Retry/backoff, connect/request timeouts, and env-driven defaults for host, port, token, tenant, and verbosity.
+- JSON payloads/metadata handled with Jackson `JsonNode` so you can work with strongly typed DTOs or raw trees.
 
 ## Install
 
@@ -12,8 +20,8 @@ The Java SDK targets Java 11+ and publishes to Maven Central under `com.eventdbx
 ```xml
 <dependency>
   <groupId>com.eventdbx</groupId>
-  <artifactId>eventdbx-client</artifactId>
-  <version>0.5.0</version>
+  <artifactId>eventdbx-java</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -21,96 +29,195 @@ The Java SDK targets Java 11+ and publishes to Maven Central under `com.eventdbx
 
 ```kotlin
 dependencies {
-  implementation("com.eventdbx:eventdbx-client:0.5.0")
+  implementation("com.eventdbx:eventdbx-java:0.0.1-SNAPSHOT")
 }
 ```
 
-## Connect and write events
+<Note>
+  The Noise handshake depends on the native `snownoise` library in this repo
+  (`native/snownoise`). Run `cargo build --release --manifest-path native/snownoise/Cargo.toml`
+  and ensure the built library is on `java.library.path` (or set `SNOWNOISE_LIB` /
+  `SNOWNOISE_LIB_PATH`) before connecting.
+</Note>
+
+## Quickstart
 
 ```java
-import com.eventdbx.EventDbxClient;
-import com.eventdbx.models.AppendRequest;
+import com.eventdbx.client.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
-EventDbxClient client = EventDbxClient.builder()
-    .host(System.getenv().getOrDefault("EVENTDBX_HOST", "127.0.0.1"))
-    .port(6363)
-    .token(System.getenv("EVENTDBX_TOKEN"))
-    .tenant("payments-prod")
+import java.time.Duration;
+import java.util.List;
+
+ObjectMapper mapper = new ObjectMapper();
+
+EventDbxConfig config = EventDbxConfig.builder()
+    // host/port/token/tenant/verbose/noNoise default to EVENTDBX_* when omitted
+    .retryPolicy(RetryPolicy.builder()
+        .maxAttempts(3)
+        .initialDelay(Duration.ofMillis(100))
+        .maxDelay(Duration.ofSeconds(1))
+        .build())
     .build();
 
-AppendRequest request = AppendRequest.builder()
-    .aggregateType("person")
-    .aggregateId("p-110")
-    .eventType("person_registered")
-    .payload(Map.of(
-        "first_name", "Noor",
-        "last_name", "Ali",
-        "email", "noor@example.com"))
-    .metadata(Map.of("@actor", "svc-directory"))
-    .build();
+try (EventDbxClient client = new EventDbxClient(config)) {
+    client.connect(); // optional; operations auto-connect
 
-client.create(request);
-client.apply(request.toBuilder()
-    .eventType("person_email_updated")
-    .payload(Map.of("email", "noor+alerts@example.com"))
+    AggregateSnapshot created = client.create(
+        "person",
+        "p-110",
+        "person_registered",
+        CreateAggregateOptions.builder()
+            .payload(mapper.readTree("{\"first_name\":\"Noor\",\"last_name\":\"Ali\",\"email\":\"noor@example.com\"}"))
+            .metadata(mapper.readTree("{\"@actor\":\"svc-directory\"}"))
+            .publishTarget("search-indexer")
+            .build());
+
+    EventRecord appended = client.apply(
+        "person",
+        "p-110",
+        "person_email_updated",
+        AppendOptions.builder()
+            .payload(mapper.readTree("{\"email\":\"noor+alerts@example.com\"}"))
+            .note("Changed by directory sync")
+            .publishTarget(PublishTarget.fromString("analytics-engine:event-only"))
+            .build());
+
+    Page<AggregateSnapshot> page = client.list("person", PageOptions.builder()
+        .take(50)
+        .filter("person.archived = false")
+        .build());
+
+    AggregateSnapshot latest = client.get("person", "p-110");
+    JsonNode projection = client.select("person", "p-110", List.of("payload.email", "metadata.@actor"));
+}
+```
+
+`EventDbxClient` is `AutoCloseable`, and defaults will pull host/port/token/tenant from the environment. Per-call `token` overrides let you scope mutations to a request without rebuilding the client.
+
+## Publish targets
+
+```java
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+
+ObjectMapper mapper = new ObjectMapper();
+
+List<PublishTarget> targets = List.of(
+    PublishTarget.of("analytics-engine"),
+    PublishTarget.fromString("fraud-worker:event-only:high")
+);
+
+client.apply(
+    "invoice",
+    "inv-42",
+    "invoice_paid",
+    AppendOptions.builder()
+        .payload(mapper.createObjectNode().put("status", "paid"))
+        .publishTargets(targets)
+        .build());
+```
+
+Omit publish targets to fan out to every enabled plugin. String specs follow `plugin:mode:priority` (mode/priority optional).
+
+## Write aggregates and events
+
+```java
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
+
+ObjectMapper mapper = new ObjectMapper();
+
+client.create(
+    "person",
+    "p-110",
+    "person_registered",
+    CreateAggregateOptions.builder()
+        .publishTarget("search-indexer")
+        .build());
+
+client.apply(
+    "person",
+    "p-110",
+    "person_email_updated",
+    AppendOptions.builder()
+        .payload(mapper.createObjectNode().put("email", "noor+alerts@example.com"))
+        .metadata(mapper.createObjectNode().put("@actor", "svc-directory"))
+        .build());
+
+client.patch(
+    "person",
+    "p-110",
+    "person_registered",
+    List.of(new JsonPatchOperation("replace", "/last_name", null, mapper.valueToTree("Ali-Khan"))),
+    PatchOptions.builder()
+        .note("surname canonicalised")
+        .publishTarget("analytics-engine:event-only")
+        .build());
+
+client.archive("person", "p-110", ArchiveOptions.builder().note("customer request").build());
+client.restore("person", "p-110", ArchiveOptions.builder().build());
+```
+
+`create` seeds a snapshot and first event atomically, `apply` appends events, `patch` issues RFC 6902 operations against historical payloads, and `archive`/`restore` toggle write access while preserving history.
+
+## Read aggregates and events
+
+```java
+AggregateSnapshot state = client.get("person", "p-110");
+
+JsonNode sparse = client.select("person", "p-110", List.of("payload.email", "metadata.note"));
+
+Page<AggregateSnapshot> firstPage = client.list("person", PageOptions.builder()
+    .take(25)
+    .includeArchived(false)
+    .filter("person.archived = false AND person.last_name LIKE 'A%'")
+    .sort("aggregateId")
+    .build());
+
+if (firstPage.nextCursor() != null) {
+    Page<AggregateSnapshot> nextPage = client.list("person", PageOptions.builder()
+        .cursor(firstPage.nextCursor())
+        .build());
+    // keep paging with nextCursor
+}
+
+Page<EventRecord> history = client.events("person", "p-110", PageOptions.builder()
+    .take(100)
+    .token("user-session-token") // per-request override
     .build());
 ```
 
-- Builders validate required fields and coerce numerics to canonical formats before submission.
-- `EventDbxClient` implements `AutoCloseable`; wrap it with try-with-resources for short-lived scripts.
-- Noise_XX handshakes are enabled automatically; there’s no TLS switch to manage.
+Use `Page.nextCursor()` to resume pagination, and `token` on `PageOptions`, `AppendOptions`, `CreateAggregateOptions`, or `PatchOptions` to scope a call without rebuilding the client.
 
-## Reactive + async workflows
+## Retry and timeouts
 
-```java
-import reactor.core.publisher.Flux;
+- `RetryPolicy` controls exponential backoff (`maxAttempts`, `initialDelay`, `maxDelay`); defaults to a single attempt.
+- `connectTimeout` and `requestTimeout` live on `EventDbxConfig` and default to 3s / 10s respectively.
+- `client.isConnected()` and `client.disconnect()` help when hot reloading or orchestrating graceful shutdowns.
 
-Flux<EventRecord> stream = client.stream(builder -> builder
-    .aggregateType("person")
-    .fromTail()
-    .follow(true));
+## Runtime configuration
 
-stream.subscribe(record -> logger.info("{} -> {}", record.aggregateId(), record.eventType()));
+| Variable                 | Default                               | Description                                                  |
+| ------------------------ | ------------------------------------- | ------------------------------------------------------------ |
+| `EVENTDBX_HOST`          | `127.0.0.1`                           | Hostname or IP address of the control socket.                |
+| `EVENTDBX_PORT`          | `6363`                                | TCP port for the control plane.                              |
+| `EVENTDBX_TOKEN`         | _empty_                               | Control token forwarded during the handshake.                |
+| `EVENTDBX_TENANT_ID`     | _empty_                               | Tenant identifier included in the initial hello.             |
+| `EVENTDBX_VERBOSE`       | `false`                               | Set `1/true` to request verbose mutation responses.          |
+| `EVENTDBX_NO_NOISE`      | `false`                               | Set `1/true` to request plaintext transport (server must allow it). |
+| `EVENTDBX_NOISE_PATTERN` | `Noise_NNpsk0_25519_ChaChaPoly_SHA256` | Override the Noise pattern used during the handshake.        |
+
+## Noise transport
+
+Noise is enabled by default with a PSK derived from the control token. Only disable it for controlled testing by passing `noNoise(true)` on `EventDbxConfig` or setting `EVENTDBX_NO_NOISE=1`; production deployments should keep Noise on. You can also override the handshake pattern with `EVENTDBX_NOISE_PATTERN` when experimenting with other Noise variants.
+
+## Development & testing
+
+```bash
+cargo build --release --manifest-path native/snownoise/Cargo.toml
+mvn test
 ```
 
-- Reactor, Mutiny, and CompletableFuture adapters ship in the same artifact.
-- Backpressure-aware streaming keeps a single socket open and automatically resumes when network hiccups occur.
-- Pass `checkpointStore` to the stream builder to persist offsets (JDBC, Redis, S3, etc.).
-
-## Reads and projections
-
-```java
-AggregateState<Person> state = client.get("person", "p-110", Person.class);
-List<AggregateState<Person>> aggregates = client.list(opts -> opts
-    .aggregateType("person")
-    .limit(50));
-
-Projection projection = client.select("person", "p-110", SelectFields.of("payload.email", "metadata.@actor"));
-```
-
-`AggregateState<T>` wraps payload, metadata, Merkle hashes, and audit stamps so projection builders can emit complete DTOs.
-
-## JSON Patch and lifecycle controls
-
-```java
-client.patch(builder -> builder
-    .aggregateType("person")
-    .aggregateId("p-110")
-    .eventType("person_registered")
-    .patch(Map.of("op", "replace", "path", "/last_name", "value", "Ali-Khan")));
-
-client.archive("person", "p-110");
-client.restore("person", "p-110");
-```
-
-## Framework integrations
-
-- **Spring Boot starter**: add `com.eventdbx:eventdbx-spring-starter` to auto-configure the client, metrics, and health indicators.
-- **Micrometer**: metrics emit `eventdbx.client.latency` and `eventdbx.client.retries` tags; wire them into Prometheus or OTEL exporters.
-- **Jakarta EE**: register the client as an application-scoped bean and inject it into JAX-RS resources or CDI observers.
-
-## Testing
-
-- `EventDbxRule` spins up a sandbox daemon and exposes helper methods to seed aggregates before each test.
-- Use the packaged WireMock stubs (`eventdbx-testkit`) if you can’t run the daemon in CI; they mimic success/error envelopes.
-- Combine with Testcontainers to launch EventDBX, run migrations, and execute integration specs inside the same JVM.
+Run the native build once per platform so the Noise handshake can load its bindings, then execute the Maven tests or package tasks as usual.
