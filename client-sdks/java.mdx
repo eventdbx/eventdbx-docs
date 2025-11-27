@@ -15,13 +15,15 @@ The Java SDK targets Java 17+ and mirrors the Node.js control client. It opens a
 
 ## Install
 
+Packages are published to GitHub Packages (`maven.pkg.github.com/eventdbx/eventdbx-java`). Add the repository and dependency to your build.
+
 ### Maven
 
 ```xml
 <dependency>
   <groupId>com.eventdbx</groupId>
   <artifactId>eventdbx-java</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+  <version>0.1.8</version>
 </dependency>
 ```
 
@@ -29,15 +31,16 @@ The Java SDK targets Java 17+ and mirrors the Node.js control client. It opens a
 
 ```kotlin
 dependencies {
-  implementation("com.eventdbx:eventdbx-java:0.0.1-SNAPSHOT")
+  implementation("com.eventdbx:eventdbx-java:0.1.8")
 }
 ```
 
 <Note>
   The Noise handshake depends on the native `snownoise` library in this repo
-  (`native/snownoise`). Run `cargo build --release --manifest-path native/snownoise/Cargo.toml`
-  and ensure the built library is on `java.library.path` (or set `SNOWNOISE_LIB` /
-  `SNOWNOISE_LIB_PATH`) before connecting.
+  (`native/snownoise`). Run `cargo build --release --manifest-path
+  native/snownoise/Cargo.toml` and ensure the built library is on
+  `java.library.path` (or set `SNOWNOISE_LIB` / `SNOWNOISE_LIB_PATH`) before
+  connecting.
 </Note>
 
 ## Quickstart
@@ -199,15 +202,15 @@ Use `Page.nextCursor()` to resume pagination, and `token` on `PageOptions`, `App
 
 ## Runtime configuration
 
-| Variable                 | Default                               | Description                                                  |
-| ------------------------ | ------------------------------------- | ------------------------------------------------------------ |
-| `EVENTDBX_HOST`          | `127.0.0.1`                           | Hostname or IP address of the control socket.                |
-| `EVENTDBX_PORT`          | `6363`                                | TCP port for the control plane.                              |
-| `EVENTDBX_TOKEN`         | _empty_                               | Control token forwarded during the handshake.                |
-| `EVENTDBX_TENANT_ID`     | _empty_                               | Tenant identifier included in the initial hello.             |
-| `EVENTDBX_VERBOSE`       | `false`                               | Set `1/true` to request verbose mutation responses.          |
-| `EVENTDBX_NO_NOISE`      | `false`                               | Set `1/true` to request plaintext transport (server must allow it). |
-| `EVENTDBX_NOISE_PATTERN` | `Noise_NNpsk0_25519_ChaChaPoly_SHA256` | Override the Noise pattern used during the handshake.        |
+| Variable                 | Default                                | Description                                                         |
+| ------------------------ | -------------------------------------- | ------------------------------------------------------------------- |
+| `EVENTDBX_HOST`          | `127.0.0.1`                            | Hostname or IP address of the control socket.                       |
+| `EVENTDBX_PORT`          | `6363`                                 | TCP port for the control plane.                                     |
+| `EVENTDBX_TOKEN`         | _empty_                                | Control token forwarded during the handshake.                       |
+| `EVENTDBX_TENANT_ID`     | _empty_                                | Tenant identifier included in the initial hello.                    |
+| `EVENTDBX_VERBOSE`       | `false`                                | Set `1/true` to request verbose mutation responses.                 |
+| `EVENTDBX_NO_NOISE`      | `false`                                | Set `1/true` to request plaintext transport (server must allow it). |
+| `EVENTDBX_NOISE_PATTERN` | `Noise_NNpsk0_25519_ChaChaPoly_SHA256` | Override the Noise pattern used during the handshake.               |
 
 ## Noise transport
 
