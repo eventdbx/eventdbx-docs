@@ -1,89 +1,198 @@
 ---
 title: ".NET SDK"
-description: "Call EventDBX from ASP.NET Core, worker services, and background jobs using the EventDbx.Client package."
+description: "Call EventDBX from C#/.NET apps with the asynchronous EventDbx.Client TCP client."
 ---
 
-The .NET SDK supports .NET 6+, runs on Windows/Linux/macOS, and exposes both synchronous and asynchronous APIs. It integrates with dependency injection, Polly resilience libraries, and source generators for typed aggregates.
+The .NET SDK targets .NET 8+, opens a persistent TCP connection to the EventDBX control socket, and speaks Cap'n Proto over Noise NNpsk0 by default. It returns JSON payloads so you can hydrate POCOs with `System.Text.Json` or forward envelopes directly to workers.
+
+## Feature highlights
+
+- Async-first API surface with Task-returning methods and `IAsyncDisposable` cleanup.
+- Create/apply/patch/archive helpers plus per-call publish target routing to plugins.
+- Aggregate reads for `get`, `select`, `list`, `events`, and `verify` with filters, cursors, and sorting.
+- Snapshot helpers (`create`, `list`, `get`) and control-plane admin for schemas and tenants.
+- Noise transport enabled by default; opt out with `UseNoise = false` for lab sockets.
+- Per-call token overrides; tenant selection happens during the initial handshake.
 
 ## Install
 
 ```powershell
-dotnet add package EventDbx.Client --version 0.5.0
+dotnet add package EventDbx.Client
 ```
 
-## Configure and connect
+<Note>Targets .NET 8.0. The package is cross-platform and works on Windows, Linux, and macOS.</Note>
+
+## Connect and configure
 
 ```csharp
-using EventDbx.Client;
-using EventDbx.Client.Options;
+using EventDbx;
 
-var options = new EventDbxOptions
+var options = new EventDbxClientOptions
 {
-    Host = builder.Configuration["EventDbx:Host"] ?? "127.0.0.1",
-    Port = builder.Configuration.GetValue("EventDbx:Port", 6363),
-    Token = builder.Configuration["EventDbx:Token"],
-    Tenant = builder.Configuration["EventDbx:Tenant"] ?? "default",
+    Host = Environment.GetEnvironmentVariable("EVENTDBX_HOST") ?? "127.0.0.1",
+    Port = int.TryParse(Environment.GetEnvironmentVariable("EVENTDBX_PORT"), out var port) ? port : 6363,
+    Token = Environment.GetEnvironmentVariable("EVENTDBX_TOKEN") ?? throw new InvalidOperationException("EVENTDBX_TOKEN is required"),
+    TenantId = Environment.GetEnvironmentVariable("EVENTDBX_TENANT_ID") ?? "default",
+    RequestTimeout = TimeSpan.FromSeconds(10),
+    ConnectTimeout = TimeSpan.FromSeconds(5),
+    UseNoise = true, // set false when connecting to plaintext lab sockets
 };
 
-var client = new EventDbxClient(options);
-await client.ConnectAsync();
+await using var client = await EventDbxClient.ConnectAsync(options);
 ```
 
-Register the client once per application and reuse it; connections are thread-safe and multiplex requests.
-Noise handshakes are negotiated automatically, so there’s no TLS toggle to manage.
+`ConnectAsync` performs the handshake and returns a connected client. Dispose it during graceful shutdown to release the socket.
 
-## Write and read aggregates
+### Runtime configuration
 
-```csharp
-await client.Aggregate("person")
-    .CreateAsync("p-110", "person_registered", new
-    {
-        firstName = "Sora",
-        lastName = "Kim",
-        email = "sora@example.com"
-    }, metadata: new { @actor = "svc-directory" });
+| Variable             | Default     | Description                                                  |
+| -------------------- | ----------- | ------------------------------------------------------------ |
+| `EVENTDBX_HOST`      | `127.0.0.1` | Hostname or IP address of the control socket.                |
+| `EVENTDBX_PORT`      | `6363`      | TCP port for the control plane.                              |
+| `EVENTDBX_TOKEN`     | _empty_     | Control token sent during the handshake; required.           |
+| `EVENTDBX_TENANT_ID` | `default`   | Tenant identifier included in the hello message.             |
 
-await client.Aggregate("person")
-    .ApplyAsync("p-110", "person_email_updated", new { email = "sora+primary@example.com" });
+Pass these into `EventDbxClientOptions`; the client does not read environment variables automatically.
 
-var state = await client.Aggregate("person").GetAsync<Person>("p-110");
-var history = await client.Aggregate("person").EventsAsync("p-110");
-```
+## Manage authentication and tenancy
 
-- Anonymous types serialize to JSON automatically; use records or classes for compile-time safety.
-- `GetAsync<T>` deserializes payloads, metadata, and snapshot fields into typed objects.
-
-## Dependency injection + Polly
+Override tokens per call to scope permissions. Tenant IDs are fixed at connect time; spin up a separate client per tenant.
 
 ```csharp
-builder.Services.AddEventDbx(builder.Configuration);
+var sessionToken = httpContext.Request.Headers["x-eventdbx-token"].FirstOrDefault();
 
-builder.Services.AddResilientEventDbx(options =>
+var updated = await client.AppendEventAsync(new AppendEventParams
 {
-    options.RetryCount = 5;
-    options.Timeout = TimeSpan.FromSeconds(3);
-    options.Backoff = Backoff.Exponential();
+    AggregateType = "person",
+    AggregateId = "p-110",
+    EventType = "person_email_updated",
+    Payload = new { email = "sora+primary@example.com" },
+    Metadata = new Dictionary<string, object?> { ["@actor"] = httpContext.User.Identity?.Name },
+    Note = "Changed by profile service",
+    PublishTargets = new[] { new PublishTarget(plugin: "webhook", mode: "async") },
+    Token = string.IsNullOrWhiteSpace(sessionToken) ? null : sessionToken,
 });
 ```
 
-- `AddEventDbx` registers `IEventDbxClient`, health checks, and typed client factories.
-- `AddResilientEventDbx` wires Polly retry/circuit-breaker policies for every call.
+If no override is provided, the client reuses the token from `EventDbxClientOptions`.
 
-## JSON Patch + lifecycle helpers
+## Write aggregates and events
 
 ```csharp
-await client.Aggregate("person")
-    .PatchAsync("p-110", "person_registered", new[]
-    {
-        new JsonPatchOperation("replace", "/last_name", "Kim-Park"),
-    });
+await client.CreateAggregateAsync(new CreateAggregateParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    EventType = "person_registered",
+    Payload = new { first_name = "Jaya", last_name = "Singh", email = "jaya@example.com" },
+    Metadata = new Dictionary<string, object?> { ["@actor"] = "svc-directory" },
+});
 
-await client.Aggregate("person").ArchiveAsync("p-110");
-await client.Aggregate("person").RestoreAsync("p-110");
+await client.AppendEventAsync(new AppendEventParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    EventType = "person_email_updated",
+    Payload = new { email = "jaya+alerts@example.com" },
+});
+
+await client.PatchEventAsync(new PatchEventParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    EventType = "person_registered",
+    Patch = new[] { new { op = "replace", path = "/first_name", value = "Jayah" } },
+});
+
+await client.SetArchiveAsync(new SetArchiveParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    Archived = true,
+    Note = "customer request",
+});
+
+// restore by setting Archived = false
+await client.SetArchiveAsync(new SetArchiveParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    Archived = false,
+});
 ```
 
-## Testing
+Payloads, metadata, and patches are serialized with `System.Text.Json`; anonymous types or POCOs both work.
 
-- Use `EventDbxClientFactory.CreateInMemory()` to stub the transport in unit tests.
-- Integration tests can call `dbx sandbox start --tenant dotnet-tests --auto-reset` inside `IHostedService` fixtures.
-- Source generators (`EventDbx.Client.Generators`) build strongly typed aggregate helpers you can share between production code and tests.
+## Read aggregates and events
+
+```csharp
+using System.Text.Json;
+
+var latest = await client.GetAggregateAsync("person", "p-110");
+if (latest.Found)
+{
+    using var doc = JsonDocument.Parse(latest.AggregateJson!);
+    var email = doc.RootElement.GetProperty("payload").GetProperty("email").GetString();
+}
+
+var projection = await client.SelectAggregateAsync(new SelectAggregateParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    Fields = new[] { "payload.first_name", "payload.email" },
+});
+
+var firstPage = await client.ListAggregatesAsync(new ListAggregatesOptions
+{
+    Take = 25,
+    Filter = "person.archived = false AND person.last_name LIKE 'S%'",
+    Sort = new[] { new AggregateSortOption(AggregateSortField.CreatedAt, descending: true) },
+});
+
+if (firstPage.HasNextCursor)
+{
+    var next = await client.ListAggregatesAsync(new ListAggregatesOptions { Cursor = firstPage.NextCursor });
+}
+
+var history = await client.ListEventsAsync("person", "p-110", new ListEventsOptions { Take = 100 });
+var merkle = await client.VerifyAggregateAsync("person", "p-110");
+```
+
+`ListAggregatesAsync` and `ListEventsAsync` return JSON strings and cursor metadata; feed `NextCursor` into subsequent calls to resume paging.
+
+## Filters, sorting, and pagination
+
+Filters use the same SQL-like grammar as the control plane (`field = value AND other_field > 10`). Sort fields accept names such as `aggregate_type`, `aggregate_id`, `created_at`, `updated_at`, and `archived`. You can pass a raw string via `SortText` (`"created_at:desc,aggregate_id:asc"`) or a strongly typed list of `AggregateSortOption`. Timestamp cursors (`ts:<aggregate_type>:<aggregate_id>`) pass through unchanged when used with timestamp sorts.
+
+## Snapshots and admin helpers
+
+```csharp
+await client.CreateSnapshotAsync(new CreateSnapshotParams
+{
+    AggregateType = "person",
+    AggregateId = "p-110",
+    Comment = "pre-migration snapshot",
+});
+
+var snapshots = await client.ListSnapshotsAsync(new ListSnapshotsOptions { AggregateType = "person" });
+var snapshot = await client.GetSnapshotAsync(new GetSnapshotParams { SnapshotId = 42 });
+
+var schemasJson = await client.ListSchemasAsync();
+var replaced = await client.ReplaceSchemasAsync(new ReplaceSchemasParams { Schemas = new { person = new { version = 1 } } });
+
+var publish = await client.TenantSchemaPublishAsync(new TenantSchemaPublishParams
+{
+    TenantId = "default",
+    Activate = true,
+    Reload = true,
+});
+
+var assigned = await client.TenantAssignAsync(new TenantAssignParams { TenantId = "tenant-123", ShardId = "shard-a" });
+var quota = await client.TenantQuotaSetAsync(new TenantQuotaSetParams { TenantId = "tenant-123", MaxStorageMb = 1024 });
+```
+
+These helpers cover point-in-time snapshots plus schema and tenant management flows (assign/unassign, quotas, reloads, and schema publication).
+
+## Noise transport
+
+Noise NNpsk0 is enabled by default and derives a PSK from the control token. Only disable it for trusted lab sockets by setting `UseNoise = false` in `EventDbxClientOptions`.

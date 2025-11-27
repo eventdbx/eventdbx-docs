@@ -42,6 +42,7 @@
               "client-sdks/javascript",
               "client-sdks/python",
               "client-sdks/rust",
+              "client-sdks/dotnet",
               "client-sdks/java",
               "client-sdks/php"
             ]
