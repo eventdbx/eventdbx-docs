@@ -3,12 +3,14 @@ title: "Overview"
 description: "Use the official EventDBX client libraries across Python, Java, PHP, NodeJS, .NET, and Go."
 ---
 
-Every SDK exposes the same primitives—connect, authenticate, create aggregates, append events, and stream history. Pick the language that matches your service stack and follow the quickstart below.
+Every SDK speaks the same control-socket protocol (Noise + Cap'n Proto via `control.capnp`) over the control port (typically TCP 6363) and reuses one TCP connection per process. Install the package for your stack, connect once, and reuse the client. Deep dives link to the full language guides.
 
 <Info>
-  You can always fall back to the CLI or REST API, but SDKs wrap retries,
-  pagination, and typing so product engineers ship faster.
+  Prefer SDKs over raw sockets—the clients ship retries, pagination helpers, and
+  typed payload handling so product teams can focus on domain logic.
 </Info>
+
+All clients can route writes to specific plugins with publish targets (`plugin[:mode[:priority]]`), and accept per-call overrides so you can fan out to analytics, webhooks, or custom workers without rebuilding the client.
 
 ## See it, shape it
 
@@ -28,203 +30,166 @@ Every SDK exposes the same primitives—connect, authenticate, create aggregates
 - `archive` – mark aggregates read-only so they remain queryable but reject new events.
 - `restore` – flip archived aggregates back to active, allowing writes again.
 
-## Typescript
+## JavaScript
 
 ```bash
 npm install eventdbxjs
 ```
 
-```typescript
+```ts
 import { createClient } from "eventdbxjs";
 
 const client = createClient({
   ip: process.env.EVENTDBX_HOST ?? "127.0.0.1",
   port: Number(process.env.EVENTDBX_PORT) || 6363,
   token: process.env.EVENTDBX_TOKEN,
-  tenantId: "default",
+  tenantId: process.env.EVENTDBX_TENANT_ID ?? "default",
 });
 
-await client.connect();
-
-await client.create("person", "p-110", "person_created", {
-  payload: {
-    fist_name: "Demo",
-    last_name: "Demo",
-    email: "jane@example.com",
-  },
-  metadata: { "@createdBy": "<current-id>" },
-  note: "person created by <email>",
-});
-
-const history = await client.events("person", "p-110");
-console.log("Event count:", history.length);
-
-await client.disconnect();
+await client.connect(); // returns a reusable TCP socket; call disconnect on shutdown
 ```
 
-Features:
-
-- Promise-first API plus async iterables for streaming aggregate history or live tails.
-- Full TypeScript declarations so payloads/metadata stay strongly typed across your app.
-- Automatic reconnect + exponential-backoff retries baked into every call.
+- Native Node-API addon that speaks Cap'n Proto over TCP with Noise by default.
+- Promise-first API with async iterables for streaming reads; optional per-call token/publish targets.
+- Retries/backoff and verbose/non-verbose mutation responses.
+- [Deep dive to JavaScript SDK](/client-sdks/javascript)
 
 ## Python
 
 ```bash
-pip install eventdbx
+python -m pip install eventdbx
 ```
 
 ```python
-import json
+from eventdbx import EventDBXClient
 
-from eventdbx import EventDBXClient, PublishTarget
-
-with EventDBXClient(token="<token>", tenant_id="<tenant_id>", no_noise=False) as client:
-    # Create a brand-new aggregate via the control plane
-    created = client.create(
-        aggregate_type="person",
-        aggregate_id="p-110",
-        event_type="person_registered",
-        payload_json=json.dumps(
-            {"first_name": "Ari", "last_name": "Diaz", "email": "ari@example.com"}
-        ),
-        publish_targets=[PublishTarget(plugin="webhook", mode="async")],
-    )
-
-    # Append follow-up events to the aggregate
-    updated = client.apply(
-        aggregate_type="person",
-        aggregate_id="p-110",
-        event_type="person_email_updated",
-        payload_json=json.dumps({"email": "ari+alerts@example.com"}),
-    )
-
-    # List aggregates or fetch events for a specific aggregate
-    aggregates = client.list(take=50, type="person")
-
-    # Apply JSON Patch documents to historical events
-    patched = client.patch(
-        aggregate_type="person",
-        aggregate_id="p-110",
-        event_type="person_registered",
-        patches=[{"op": "replace", "path": "/last_name", "value": "Diaz-Garcia"}],
-    )
-
-    # Archive / restore lifecycle management
-    client.restore(aggregate_type="person", aggregate_id="p-110")
+with EventDBXClient(
+    token="control_token",
+    tenant_id="tenant-123",
+    host="127.0.0.1",
+    port=6363,
+) as client:
+    latest = client.get(aggregate_type="person", aggregate_id="p-110")
 ```
 
-Features:
+- Synchronous TCP client; handshake happens on construction and reuses one socket.
+- Noise XX on by default; toggle with `no_noise` / `EVENTDBX_NO_NOISE` for lab setups.
+- Optional retries and verbose/non-verbose mutation responses; includes admin helpers for schemas/tenants.
+- [Deep dive to Python SDK](/client-sdks/python)
 
-- Synchronous TCP client with Noise security by default and an opt-out `no_noise` flag for lab setups.
-- Built-in retry with exponential backoff and verbose/non-verbose mutation responses.
-- Publish target routing plus archive/restore, JSON Patch, snapshots, and schema/tenant admin helpers.
-
-## Java (Coming Soon)
+## Java
 
 ```xml
 <dependency>
   <groupId>com.eventdbx</groupId>
-  <artifactId>eventdbx-client</artifactId>
-  <version>0.5.0</version>
+  <artifactId>eventdbx-java</artifactId>
+  <version>0.1.8</version>
 </dependency>
 ```
 
 ```java
-EventDbx client = EventDbx.builder()
-    .host("payments.internal")
-    .port(6363)
+import com.eventdbx.client.*;
+
+EventDbxConfig config = EventDbxConfig.builder()
     .token(System.getenv("EVENTDBX_TOKEN"))
-    .domain("payments-prod")
+    .tenant("default")
     .build();
 
-client.aggregate("person")
-      .apply("p-110", "person_email_updated", Map.of("email", "jaya@example.com"));
+try (EventDbxClient client = new EventDbxClient(config)) {
+    client.connect();
+    var snapshot = client.get("person", "p-110");
+}
 ```
 
-Features:
+- Blocking control client mirroring Node parity (`create`, `apply`, `patch`, reads).
+- Noise transport via the bundled `snownoise` native library; retries/backoff configurable.
+- Publish targets, per-call token overrides, and Jackson-based JSON handling.
+- [Deep dive to Java SDK](/client-sdks/java)
 
-- Reactor and CompletableFuture support for reactive stacks.
-- Pluggable serializers (Jackson, Gson, your own).
-- Micrometer metrics out of the box.
-
-## PHP (Coming Soon)
+## PHP
 
 ```bash
-composer require eventdbx/eventdbx
+composer require eventdbx/eventdbx-php
 ```
 
 ```php
-$client = new EventDbx\Client([
-    'host' => 'payments.internal',
-    'port' => 6363,
-    'token' => $_ENV['EVENTDBX_TOKEN'],
-    'domain' => 'payments-prod',
+use EventDbx\Client;
+
+$client = new Client([
+    'host' => getenv('EVENTDBX_HOST') ?: '127.0.0.1',
+    'port' => (int) (getenv('EVENTDBX_PORT') ?: 6363),
+    'token' => getenv('EVENTDBX_TOKEN'),
+    'tenantId' => getenv('EVENTDBX_TENANT_ID') ?: 'default',
 ]);
 
-$client->aggregate('person')->apply('p-110', 'person_email_updated', [
-    'payload' => ['email' => 'person@example.com'],
-    'metadata' => ['@actor' => 'csr-22'],
-]);
+$state = $client->get('person', 'p-110');
 ```
 
-Features:
+- Native FFI wrapper over the Rust control client; Noise on by default, configurable per client.
+- Per-call publish targets and token overrides; methods return JSON payloads/envelopes.
+- Requires building the bundled native library before first use.
+- [Deep dive to PHP SDK](/client-sdks/php)
 
-- Laravel/Symfony service providers.
-- Automatic JSON encoding with depth limits.
-- Middleware hooks for logging and tracing.
-
-## .NET (Coming Soon)
+## .NET
 
 ```powershell
-dotnet add package EventDBX.Client
+dotnet add package EventDbx.Client
 ```
 
 ```csharp
-var client = new EventDbxClient(new EventDbxOptions {
-    Host = "payments.internal",
-    Port = 6363,
-    Token = Environment.GetEnvironmentVariable("EVENTDBX_TOKEN"),
-    Domain = "payments-prod",
-});
+using EventDbx;
 
-await client.Aggregates["person"]
-    .ApplyAsync("p-110", "person_email_updated", new {
-        email = "person@example.com"
-    });
+var options = new EventDbxClientOptions
+{
+    Host = Environment.GetEnvironmentVariable("EVENTDBX_HOST") ?? "127.0.0.1",
+    Port = int.TryParse(Environment.GetEnvironmentVariable("EVENTDBX_PORT"), out var port) ? port : 6363,
+    Token = Environment.GetEnvironmentVariable("EVENTDBX_TOKEN") ?? throw new InvalidOperationException("EVENTDBX_TOKEN is required"),
+    TenantId = Environment.GetEnvironmentVariable("EVENTDBX_TENANT_ID") ?? "default",
+};
+
+await using var client = await EventDbxClient.ConnectAsync(options);
 ```
 
-Features:
+- Async-first TCP client with Noise enabled by default; dispose with `IAsyncDisposable`.
+- Methods return JSON strings plus cursor metadata; per-call token overrides supported.
+- Snapshot and schema/tenant admin helpers mirror the control plane.
+- [Deep dive to .NET SDK](/client-sdks/dotnet)
 
-- `IHostedService` integration for background workers.
-- Polly-based resilience policies.
-- Source generators for strongly typed aggregates.
-
-## Go (Coming Soon)
+## Go
 
 ```bash
-go get github.com/eventdbx/client-go
+go get github.com/eventdbx/eventdbx-go
 ```
 
 ```go
-cli := eventdbx.NewClient(eventdbx.Config{
-    Host:  "payments.internal",
-    Port:  6363,
-    Token: os.Getenv("EVENTDBX_TOKEN"),
-    Domain: "payments-prod",
-})
+package main
 
-err := cli.Aggregate("person").Apply(ctx, "p-110", "person_email_updated", eventdbx.Event{
-    Payload: map[string]any{"email": "person@example.com"},
-    Metadata: map[string]any{"@actor": "svc-directory"},
-})
+import (
+    "log"
+    "os"
+
+    eventdbx "github.com/eventdbx/eventdbx-go"
+)
+
+func main() {
+    cli, err := eventdbx.NewClient(eventdbx.Config{
+        Host:     os.Getenv("EVENTDBX_HOST"),
+        Port:     eventdbx.DefaultPort,
+        Token:    os.Getenv("EVENTDBX_TOKEN"),
+        TenantID: "default",
+        UseNoise: eventdbx.Bool(true),
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cli.Close()
+}
 ```
 
-Features:
-
-- Context-aware calls for cancellation/timeouts.
-- Native channels for streaming events.
-- OTEL instrumentation helpers.
+- Synchronous client returning JSON strings; configure connect/read timeouts in `Config`.
+- Noise NNpsk0 enabled by default; set `EVENTDBX_NO_NOISE` or `UseNoise` to disable in labs.
+- Pagination with cursors for aggregates/events plus snapshots and schema/tenant admin helpers.
+- [Deep dive to Go SDK](/client-sdks/go)
 
 ## Rust
 
@@ -233,54 +198,31 @@ cargo add eventdbx-client
 ```
 
 ```rust
-use eventdbx_client::{
-    AppendEventRequest, ClientConfig, EventDbxClient, ListAggregatesOptions,
-};
-use serde_json::json;
-use std::env;
+use eventdbx_client::{ClientConfig, EventDbxClient};
 
 #[tokio::main]
 async fn main() -> eventdbx_client::Result<()> {
-    let host = env::var("EVENTDBX_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let token = env::var("EVENTDBX_TOKEN")?;
-    let port = env::var("EVENTDBX_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(6363);
-    let tenant = env::var("EVENTDBX_TENANT").unwrap_or_else(|_| "default".into());
+    let config = ClientConfig::new("127.0.0.1", std::env::var("EVENTDBX_TOKEN")?)
+        .with_tenant("default")
+        .with_port(6363);
 
-    let config = ClientConfig::new(host, token)
-        .with_port(port)
-        .with_tenant(tenant);
     let client = EventDbxClient::connect(config).await?;
-
-    let append = AppendEventRequest::new(
-        "person",
-        "p-110",
-        "person_registered",
-        json!({ "first_name": "Nia", "last_name": "Patel" }),
-    );
-    client.append_event(append).await?;
-
-    let aggregates = client
-        .list_aggregates(ListAggregatesOptions::default().aggregate_type("person"))
-        .await?;
-    println!("Aggregates returned: {}", aggregates.aggregates.len());
-
+    let _state = client.get_aggregate("person", "p-110").await?;
     Ok(())
 }
 ```
 
-Features:
-
-- Tokio-native async client with automatic Cap'n Proto handshake and per-call timeouts.
-- Request builders (`AppendEventRequest`, `PatchEventRequest`, etc.) keep payloads strongly typed through `serde_json`.
-- Optional `telemetry` feature wires into `tracing`, plus the bundled `dbxtest-cli` binary for quick smoke tests.
+- Tokio-native async client with Noise XX enabled by default and configurable timeouts.
+- Request/response builders keep payloads/metadata strongly typed via `serde_json`.
+- Per-call publish targets, notes, and token overrides for scoped mutations.
+- [Deep dive to Rust SDK](/client-sdks/rust)
 
 ## Common patterns
 
-- **Configuration**: Defer host/port/token to environment variables or service discovery.
-- **Retries**: All SDKs expose hooks to adjust retry counts and logging; align them with your SLOs.
-- **Testing**: Use the embedded EventDBX test harness (`dbx sandbox start`) plus SDK test utilities to stub responses.
+- **Config from env**: Provide host/port/token/tenant via environment variables so deployments stay portable; most clients also expose explicit option fields.
+- **Connect once**: Create one client per process/tenant, reuse the TCP socket, and close/dispose on shutdown to release cursors cleanly.
+- **Publish targets**: Route writes to specific plugins with `plugin[:mode[:priority]]`; omit targets to fan out to all enabled plugins.
+- **Retries/timeouts**: Opt into retries/backoff for transport errors and tune connect/request timeouts for your SLOs.
+- **Per-call scope**: Override tokens per request when scoping permissions to a user session without rebuilding the client.
 
-If your language is missing, open an issue or follow the SDK template in `sdk/examples` to build your own.
+If your language is missing, open an issue or follow the control protocol in `control.capnp` to build your own.
