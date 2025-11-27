@@ -1,137 +1,175 @@
 ---
 title: "Go SDK"
-description: "Use the idiomatic Go client to work with aggregates, events, and streaming cursors."
+description: "Use the EventDBX Go client to call the control-plane TCP API over Cap'n Proto."
 ---
 
-The Go package (`github.com/eventdbx/client-go`) favors context-aware calls, small interfaces, and composable middleware. It plays nicely with standard `net/http`, OpenTelemetry, and Go modules.
+The Go client opens a framed TCP session to the control plane, performs the Noise NNpsk0 handshake, and exchanges Cap'n Proto control messages. It mirrors the verb set used by the other SDKs and returns raw JSON strings so you can hydrate your own structs.
+
+## Feature highlights
+
+- Create/apply/patch/archive helpers with optional publish targets and metadata.
+- Aggregate reads for `get`, `select`, `list`, `events`, and `verify` with cursors, filters, and sorting.
+- Snapshot helpers (`create`, `list`, `get`) plus admin verbs for schemas and tenants.
+- Noise transport on by default; disable only for trusted lab sockets.
+- Retries with backoff and verbose mutation responses by default.
 
 ## Install
 
 ```bash
-go get github.com/eventdbx/client-go
+go get github.com/eventdbx/eventdbx-go
 ```
 
-<Note>Modules are versioned with semantic tags (`v0.x.y`). Pin a specific tag in `go.mod` for reproducible builds.</Note>
+<Note>Modules are tagged with semver (`v0.x.y`). Pin a specific tag in `go.mod` for reproducible builds.</Note>
 
-## Connect and write events
+## Connect and configure
 
 ```go
 package main
 
 import (
-    "context"
     "log"
     "os"
+    "strconv"
 
-    eventdbx "github.com/eventdbx/client-go"
+    eventdbx "github.com/eventdbx/eventdbx-go"
 )
 
-func main() {
-    ctx := context.Background()
+func envOr(key, fallback string) string {
+    if v := os.Getenv(key); v != "" {
+        return v
+    }
+    return fallback
+}
 
+func envInt(key string, fallback int) int {
+    if v := os.Getenv(key); v != "" {
+        if n, err := strconv.Atoi(v); err == nil {
+            return n
+        }
+    }
+    return fallback
+}
+
+func mustEnv(key string) string {
+    if v := os.Getenv(key); v != "" {
+        return v
+    }
+    log.Fatalf("%s is required", key)
+    return ""
+}
+
+func main() {
     cli, err := eventdbx.NewClient(eventdbx.Config{
-        Host:    os.Getenv("EVENTDBX_HOST"),
-        Port:    6363,
-        Token:   os.Getenv("EVENTDBX_TOKEN"),
-        Tenant:  "people",
-        Insecure: false,
+        Host:     envOr("EVENTDBX_HOST", eventdbx.DefaultHost),
+        Port:     envInt("EVENTDBX_PORT", eventdbx.DefaultPort),
+        Token:    mustEnv("EVENTDBX_TOKEN"),
+        TenantID: envOr("EVENTDBX_TENANT_ID", "default"),
+        UseNoise: eventdbx.Bool(true),
     })
     if err != nil {
         log.Fatal(err)
     }
     defer cli.Close()
-
-    err = cli.Aggregate("person").Create(ctx, "p-110", "person_registered", eventdbx.Event{
-        Payload: map[string]any{
-            "first_name": "Rafi",
-            "last_name":  "Stone",
-            "email":      "rafi@example.com",
-        },
-        Metadata: map[string]any{"@actor": "svc-directory"},
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    _ = cli.Aggregate("person").Apply(ctx, "p-110", "person_email_updated", eventdbx.Event{
-        Payload: map[string]any{"email": "rafi+alerts@example.com"},
-    })
-
-    latest, _ := cli.Aggregate("person").Get(ctx, "p-110", nil)
-    log.Println("last event", latest.Sequence)
 }
 ```
 
-Every public method accepts a `context.Context` so you can set deadlines and cancellation signals that propagate to the underlying transport.
+`NewClient` performs the handshake and returns a connected client. Close it during graceful shutdown to release the socket.
 
-## Query aggregates
+### Runtime configuration
+
+| Variable             | Default       | Description                                                  |
+| -------------------- | ------------- | ------------------------------------------------------------ |
+| `EVENTDBX_HOST`      | `127.0.0.1`   | Hostname or IP address of the control socket.                |
+| `EVENTDBX_PORT`      | `6363`        | TCP port for the control plane.                              |
+| `EVENTDBX_TOKEN`     | _empty_       | Control token sent during the handshake; required.           |
+| `EVENTDBX_TENANT_ID` | `default`     | Tenant identifier included in the hello message.             |
+| `EVENTDBX_NO_NOISE`  | _unset/false_ | When set to `1`, disables Noise for plaintext lab sockets.   |
+
+## Write aggregates and events
 
 ```go
-result, err := cli.Aggregates().List(ctx, eventdbx.ListOptions{
-    Type:   "person",
-    Status: eventdbx.AggregateStatusActive,
-    Take:   100,
+note := "customer sign-up"
+meta := `{"@actor":"svc-directory"}`
+_, err := cli.Create("person", "p-110", "person_registered", `{
+  "first_name":"Rafi",
+  "last_name":"Stone",
+  "email":"rafi@example.com"
+}`, &eventdbx.ApplyOptions{
+  Note:         &note,
+  MetadataJSON: &meta,
 })
 if err != nil {
-    return err
+    log.Fatal(err)
 }
 
-state, err := cli.Aggregate("person").Select(ctx, "p-110", []string{"payload.first_name", "payload.email"})
+_, _ = cli.Apply("person", "p-110", "person_email_updated", `{"email":"rafi+alerts@example.com"}`, nil)
+
+_, _ = cli.Patch("person", "p-110", "person_registered", `[{"op":"replace","path":"/first_name","value":"Rafiq"}]`, nil)
+
+_, _ = cli.Archive("person", "p-110", nil)
+_, _ = cli.Restore("person", "p-110", nil)
 ```
 
-- `List` and `Select` paginate automatically and expose iterators when `Take` exceeds server limits.
-- `Select` returns sparse objects that only include requested fields, reducing payload size.
-- When sorting by `created_at` or `updated_at`, you can pass shorthand timestamp cursors (`ts:<aggregate_type>:<aggregate_id>`) with your list options; the server expands them into full timestamp tokens before paging.
+Publish targets can be passed via `ApplyOptions.PublishTargets` or `PatchOptions.PublishTargets` to route events to specific plugins.
 
-## Streams and CDC workers
+## Read aggregates and events
 
 ```go
-stream := cli.Stream(eventdbx.StreamOptions{
-    Type:   "person",
-    From:   eventdbx.PositionHead(),
-    Follow: true,
+latest, _ := cli.Get("person", "p-110")
+if latest.Found {
+    log.Println("aggregate json", latest.AggregateJSON)
+}
+
+projection, _ := cli.Select("person", "p-110", []string{"payload.first_name", "payload.email"})
+
+take := uint64(25)
+filter := "person.archived = false"
+page, _ := cli.List(&eventdbx.ListAggregatesOptions{
+    Take:   &take,
+    Filter: &filter,
+    SortOptions: []eventdbx.AggregateSortOption{
+        {Field: eventdbx.AggregateSortCreatedAt, Descending: true},
+    },
 })
 
-defer stream.Close()
-for stream.Next(ctx) {
-    evt := stream.Event()
-    process(evt)
-}
-if err := stream.Err(); err != nil {
-    return err
-}
+eventsTake := uint64(50)
+events, _ := cli.Events("person", "p-110", &eventdbx.ListEventsOptions{Take: &eventsTake})
+merkle, _ := cli.Verify("person", "p-110")
 ```
 
-- Streams reuse the existing TCP connection and automatically backoff on transient disconnects.
-- Call `stream.Close()` or cancel the context to cleanly terminate.
-- Use `PartitionKey` when you need ordered shards for parallel consumers.
+`List` and `Events` return JSON strings plus cursor metadata (`HasNextCursor`, `NextCursor`). Feed `NextCursor` into subsequent calls to resume paging.
 
-## Middleware and observability
+### Filters, sorting, and pagination
+
+Filters use the same SQL-like grammar as the control plane (`field = value AND other_field > 10`). Sort fields accept `aggregate_type`, `aggregate_id`, `created_at`, `updated_at`, and `archived`. Provide a raw string via `Sort` (`"created_at:desc,aggregate_id:asc"`) or structured options via `SortOptions`.
+
+## Snapshots and admin helpers
 
 ```go
-import (
-    "context"
-    "log"
-    "time"
+comment := "pre-migration"
+_, _ = cli.CreateSnapshot("person", "p-110", &eventdbx.CreateSnapshotOptions{Comment: &comment})
 
-    eventdbx "github.com/eventdbx/client-go"
-)
+aggType := "person"
+snaps, _ := cli.ListSnapshots(&eventdbx.ListSnapshotsOptions{AggregateType: &aggType})
+snap, _ := cli.GetSnapshot(42)
 
-cli.Use(eventdbx.MiddlewareFunc(func(next eventdbx.RoundTripper) eventdbx.RoundTripper {
-    return eventdbx.RoundTripperFunc(func(ctx context.Context, req *eventdbx.Request) (*eventdbx.Response, error) {
-        start := time.Now()
-        resp, err := next.RoundTrip(ctx, req)
-        log.Printf("eventdbx op=%s latency=%s", req.Operation, time.Since(start))
-        return resp, err
-    })
-}))
+schemas, _ := cli.ListSchemas()
+_, _ = cli.ReplaceSchemas(`{"person":{"version":1}}`)
+
+assign, _ := cli.TenantAssign("tenant-123", "shard-a")
+quota, _ := cli.TenantQuotaSet("tenant-123", 1024)
+_, _ = cli.TenantSchemaPublish("default", &eventdbx.TenantSchemaPublishOptions{Activate: true, Reload: true})
 ```
 
-- Attach OTEL spans by wrapping `RoundTripper` or by injecting your own `*http.Client` via `Transport`.
-- Configure retries via `Config.Retry` (max attempts, jitter, timeout) to align with service SLOs.
+These helpers cover point-in-time snapshots plus schema and tenant management flows (assign/unassign, quotas, reloads, and schema publication).
+
+## Noise transport
+
+Noise NNpsk0 is enabled by default and derives a PSK from the control token. Disable only for trusted lab sockets by setting `EVENTDBX_NO_NOISE=1` or `UseNoise: eventdbx.Bool(false)` in `Config`.
 
 ## Testing
 
-- Use the in-memory stub `eventdbx.NewInMemory()` to run unit tests without a daemon; it implements the same interfaces.
-- For integration tests, start `dbx sandbox start --tenant go-tests --auto-reset` and point the client to `localhost`.
-- Export JSON fixtures with `cli.Aggregate("person").Dump(ctx, "tests/fixtures/person.json")` and load them later with `cli.LoadFixture`.
+- Unit tests run with `go test ./...`.
+- Integration tests expect a running control plane; set `EVENTDBX_INTEGRATION=1` along with `EVENTDBX_TOKEN`, `EVENTDBX_TENANT_ID`, and optionally `EVENTDBX_HOST`/`EVENTDBX_PORT` before running `go test`.
+
+<Note>The Go client methods are synchronous and accept no context parameter; handle timeouts via `Config.ReadTimeout` and `Config.ConnectTimeout`.</Note>
