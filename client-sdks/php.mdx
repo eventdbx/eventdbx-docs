@@ -1,75 +1,147 @@
 ---
 title: "PHP SDK"
-description: "Integrate EventDBX from Laravel, Symfony, or vanilla PHP services using the eventdbx/eventdbx package."
+description: "Use EventDBX from PHP 8.1+ via a native FFI client."
 ---
 
-The PHP SDK targets PHP 8.1+ with native attributes, enums, and readonly properties. It bundles Laravel and Symfony service providers plus PSR-18 compatible HTTP transport for custom runtimes.
+The PHP SDK is a thin FFI wrapper around the native Rust control client. It keeps feature parity with the other control clients (`create`, `apply`, `patch`, `archive` / `restore`, `list`, `events`, `get`, `select`, `verify`) while negotiating Noise + Cap'n Proto frames directly against the control socket. Defaults come from `EVENTDBX_*` environment variables, so you can drop it into Laravel, Symfony, or plain PHP services.
+
+## Feature highlights
+
+- Native control-socket client over Noise XX + Cap'n Proto with parity to other SDKs (`create`, `apply`, `patch`, `archive` / `restore`, `list`, `events`, `get`, `select`, `verify`).
+- Publish targets and per-call token overrides on mutations; payload/metadata/note fields accept any JSON-serializable data.
+- Pagination helpers for aggregates and events with `take`, `cursor`, and filtering/sorting by aggregate type.
+- Defaults for host/port/token/tenant pulled from `EVENTDBX_*`; configure timeouts and Noise on/off flags per client.
+- PHP 8.1+ with the `ffi` extension; no PSR HTTP client required because it talks to the control socket directly.
 
 ## Install
 
 ```bash
-composer require eventdbx/eventdbx
+composer require eventdbx/eventdbx-php
 ```
 
-Publish the config file in Laravel (`php artisan vendor:publish --tag=eventdbx-config`) or set environment variables (`EVENTDBX_HOST`, `EVENTDBX_TOKEN`, `EVENTDBX_TENANT`).
+<Note>
+  Build the native library before running the client:
+  <pre><code>cd vendor/eventdbx/eventdbx-php/native
+cargo build --release</code></pre>
+  The client will auto-load `native/target/release/libeventdbx_php_native.(so|dylib|dll)`.
+  Ensure FFI is allowed for your SAPI (`ffi.enable=preload` in `php.ini`, and
+  add the built library path to `ffi.preload` if your environment restricts
+  dynamic loads).
+</Note>
 
 ## Quickstart
 
 ```php
-<?php
-
 use EventDbx\Client;
-use EventDbx\Enums\Lifecycle;
 
 $client = new Client([
-    'host' => $_ENV['EVENTDBX_HOST'] ?? '127.0.0.1',
-    'port' => 6363,
-    'token' => $_ENV['EVENTDBX_TOKEN'],
-    'tenant' => 'people-prod',
+    // host/port/token/tenant fall back to EVENTDBX_* when omitted
+    'token' => getenv('EVENTDBX_TOKEN'),
+    'host' => getenv('EVENTDBX_HOST') ?: '127.0.0.1',
+    'port' => (int) (getenv('EVENTDBX_PORT') ?: 6363),
+    // 'tenantId' => getenv('EVENTDBX_TENANT_ID') ?: 'default',
+    // 'noNoise' => true, // only when the server allows plaintext
 ]);
 
 $client->create('person', 'p-110', 'person_registered', [
-    'payload' => [
-        'first_name' => 'Amina',
-        'last_name' => 'Lopez',
-        'email' => 'amina@example.com',
-    ],
+    'payload' => ['first_name' => 'Noor', 'last_name' => 'Ali', 'email' => 'noor@example.com'],
     'metadata' => ['@actor' => 'svc-directory'],
+    'note' => 'seeded via importer',
+    'publishTargets' => [['plugin' => 'search-indexer']],
 ]);
 
 $client->apply('person', 'p-110', 'person_email_updated', [
-    'payload' => ['email' => 'amina+vip@example.com'],
+    'payload' => ['email' => 'noor+alerts@example.com'],
+    'token' => 'per-call-token', // optional override for this mutation
 ]);
 
+$page = $client->list('person', ['take' => 50, 'filter' => 'person.archived = false']);
 $state = $client->get('person', 'p-110');
 $events = $client->events('person', 'p-110');
 ```
 
-- Payloads accept arrays, `JsonSerializable` objects, or typed DTOs implementing `EventPayload`.
-- Responses return associative arrays plus helper objects (`AggregateState`, `EventRecord`) when using typed mode.
-- Noise_XX handshakes run by default, so there are no TLS flags to configure.
-
-## JSON Patch and lifecycle helpers
+## Publish targets
 
 ```php
-$client->patch('person', 'p-110', 'person_registered', [
-    ['op' => 'replace', 'path' => '/last_name', 'value' => 'Perez-Lopez'],
+$client->apply('invoice', 'inv-42', 'invoice_paid', [
+    'payload' => ['status' => 'paid'],
+    'publishTargets' => [
+        ['plugin' => 'analytics-engine'],
+        ['plugin' => 'fraud-worker', 'mode' => 'event-only', 'priority' => 'high'],
+    ],
 ]);
-
-$client->transition('person', 'p-110', Lifecycle::ARCHIVED);
-$client->transition('person', 'p-110', Lifecycle::ACTIVE);
 ```
 
-`Lifecycle` enum keeps archive/restore/read-only states centralized.
+Omit publish targets to fan out to all enabled plugins. Specs follow `plugin` with optional `mode` and `priority`.
 
-## Framework integration
+## Write aggregates and events
 
-- **Laravel**: inject `EventDbx\Client` via the container, configure broadcasting connectors, and use the `eventdbx:health` artisan command for liveness checks.
-- **Symfony**: enable the provided `EventDbxBundle` for autowiring + Messenger transport that streams events directly into handlers.
-- **PSR-18**: supply your own HTTP client/middleware stack using the `transport` option when running on platforms like RoadRunner or Bref.
+```php
+$client->create('person', 'p-110', 'person_registered');
 
-## Testing
+$client->apply('person', 'p-110', 'person_email_updated', [
+    'payload' => ['email' => 'noor+alerts@example.com'],
+    'metadata' => ['@actor' => 'svc-directory'],
+    'note' => 'synced from directory',
+]);
 
-- `EventDbx\Testing\FakesClient` ships with the package; swap it with `$this->swap(Client::class, new FakesClient())` in Laravel tests.
-- Use `dbx sandbox start --tenant php-tests --auto-reset` during Pest/ PHPUnit runs for end-to-end coverage.
-- Snapshot events to disk via `$client->export('person', 'p-110', __DIR__.'/fixtures/person.json');` and re-import them later.
+$client->patch('person', 'p-110', 'person_registered', [
+    ['op' => 'replace', 'path' => '/last_name', 'value' => 'Ali-Khan'],
+], ['note' => 'canonicalised surname']);
+
+$client->archive('person', 'p-110', ['note' => 'customer request']);
+$client->restore('person', 'p-110');
+$client->verify('person', 'p-110');
+```
+
+`create` seeds the aggregate and its first event atomically; `apply` appends events; `patch` issues RFC 6902 operations against prior payloads; `archive`/`restore` toggle write access while preserving history.
+
+## Read aggregates and events
+
+```php
+$state = $client->get('person', 'p-110');
+$sparse = $client->select('person', 'p-110', ['payload.email', 'metadata.@actor']);
+
+$firstPage = $client->list('person', [
+    'take' => 25,
+    'includeArchived' => false,
+    'sort' => 'aggregateId',
+]);
+
+if (!empty($firstPage['nextCursor'])) {
+    $nextPage = $client->list('person', ['cursor' => $firstPage['nextCursor']]);
+    // keep paging with nextCursor
+}
+
+$history = $client->events('person', 'p-110', [
+    'take' => 100,
+    'token' => 'per-request-token', // optional override
+]);
+```
+
+Pagination responses include `items` and `nextCursor`; pass `cursor` back to keep paging. Filters and sorts follow the control-plane syntax (e.g., `aggregate_type = "person"` is added automatically when listing a specific type).
+
+## Runtime configuration
+
+| Variable             | Default     | Description                                                         |
+| -------------------- | ----------- | ------------------------------------------------------------------- |
+| `EVENTDBX_HOST`      | `127.0.0.1` | Hostname or IP address of the control socket.                       |
+| `EVENTDBX_PORT`      | `6363`      | TCP port for the control plane.                                     |
+| `EVENTDBX_TOKEN`     | _required_  | Control token forwarded during the handshake.                       |
+| `EVENTDBX_TENANT_ID` | `default`   | Tenant identifier included in the initial hello.                    |
+| `EVENTDBX_NO_NOISE`  | `false`     | Set `1/true` to request plaintext transport (server must allow it). |
+
+Additional constructor options (all optional): `protocol_version`, `connect_timeout_ms`, `request_timeout_ms`, `tenantId`, and `noNoise`.
+
+## Noise transport
+
+Noise is enabled by default with a PSK derived from the control token. Only disable it for controlled testing by passing `['noNoise' => true]` to the client config or setting `EVENTDBX_NO_NOISE=1`; production deployments should keep Noise on.
+
+## Development & testing
+
+```bash
+cargo build --release --manifest-path native/Cargo.toml
+composer test
+```
+
+Build the native library once per platform so PHP can load it via FFI, then run the PHPUnit suite. Ensure `ffi.enable` is permitted in your PHP SAPI and restart PHP-FPM after changing `php.ini`.

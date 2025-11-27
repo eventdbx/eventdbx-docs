@@ -42,7 +42,8 @@
               "client-sdks/javascript",
               "client-sdks/python",
               "client-sdks/rust",
-              "client-sdks/java"
+              "client-sdks/java",
+              "client-sdks/php"
             ]
           },
           {

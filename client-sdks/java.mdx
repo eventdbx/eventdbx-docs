@@ -15,8 +15,6 @@ The Java SDK targets Java 17+ and mirrors the Node.js control client. It opens a
 
 ## Install
 
-Packages are published to GitHub Packages (`maven.pkg.github.com/eventdbx/eventdbx-java`). Add the repository and dependency to your build.
-
 ### Maven
 
 ```xml
@@ -40,7 +38,8 @@ dependencies {
   (`native/snownoise`). Run `cargo build --release --manifest-path
   native/snownoise/Cargo.toml` and ensure the built library is on
   `java.library.path` (or set `SNOWNOISE_LIB` / `SNOWNOISE_LIB_PATH`) before
-  connecting.
+  connecting. Artifacts are published to Maven Central:
+  https://central.sonatype.com/artifact/com.eventdbx/eventdbx-java
 </Note>
 
 ## Quickstart
