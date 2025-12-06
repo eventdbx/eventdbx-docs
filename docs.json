@@ -32,6 +32,7 @@
               "core-concepts/domain-context",
               "core-concepts/aggregate-events",
               "core-concepts/schema-definition",
+              "core-concepts/relationships",
               "core-concepts/replication"
             ]
           },

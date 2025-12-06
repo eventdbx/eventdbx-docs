@@ -1,0 +1,33 @@
+---
+title: "Relationships"
+description: "Link aggregates with reference fields, resolve them on reads, and trace inbound referrers safely."
+---
+
+Reference columns let you model relationships without leaving EventDBX’s append-only flow. They canonicalise identifiers, enforce integrity rules at write time, and keep an index of inbound links so deletes/archives stay safe.
+
+## Declare reference fields
+
+- Mark fields as references with `dbx schema field <aggregate> <field> --type reference [--required] [--reference-integrity <strong|weak>] [--reference-tenant <tenant>] [--reference-aggregate <type>] [--reference-cascade <none|restrict|nullify>]`.
+- Accepted shapes: `domain#aggregate#id`, `aggregate#id`, or `#id` (shorthands fill in the current domain and/or aggregate type). Values are normalised to canonical lowercase segments on write.
+- Integrity: `strong` (default) rejects writes when the target aggregate is missing or forbidden; `weak` keeps the canonical text so you can backfill later.
+- Constraints: pin references to a tenant/domain and/or aggregate type to prevent drift. Cross-tenant targets are rejected.
+- Cascade: `none`/`restrict` block archive/delete while referrers exist; `nullify` auto-patches referrer fields to `null` when the target is archived or removed.
+- Migrating legacy IDs? After updating the schema, run `dbx aggregate migrate <aggregate> --event <name> --field <ref_field>[,...]` to rewrite values into canonical form and backfill the reference index.
+
+## Model relationships
+
+- One-to-many / many-to-one: put a reference on the “many” side (e.g., `order.customer_ref`). Use referrer lookups to list all children for a parent without duplicating state.
+- Many-to-many: create a join aggregate (e.g., `membership` with `user_ref` and `group_ref`), keep both refs `strong`, and query referrers from either side to fan out.
+- Self-references and hierarchies: reference the same aggregate type (or even the same instance) to model trees; resolution depth limits (default 2, max 5) prevent runaway cycles.
+
+## Resolve relationships on reads
+
+- Attach resolved targets to reads with `dbx aggregate get <aggregate> <id> --resolve [--resolve-depth <n>]`; the response adds a `resolved` tree containing referenced aggregates plus status per hop (`ok`, `not_found`, `forbidden`, `cycle`, `depth_exceeded`).
+- Bulk listings support the same flag (`dbx aggregate list --resolve --json ...`); depth defaults to `reference_default_depth` (configurable) and is capped by `reference_max_depth`.
+- Resolution only follows references within the active tenant/domain and requires the caller to have read access to each target.
+
+## Inspect referrers and guard lifecycle changes
+
+- See who points to an aggregate with `dbx aggregate referrers <aggregate> <id> [--json]`; results include `aggregate_type`, `aggregate_id`, and the `path` of the reference field.
+- The control API exposes the same data via `listReferrers`, enabling UI visualisations or pre-flight checks in automation.
+- Archive/remove protections: referrers with `none`/`restrict` cascades block the operation; `nullify` cascades are auto-patched so the target can be safely archived or deleted.
